@@ -6,25 +6,23 @@ import {
   type McpServer
 } from '@modelcontextprotocol/server';
 
+import { sortBy } from 'lodash-es';
 import * as z from 'zod/v4';
 
+import { brokerAdapter, configuredBrokers } from '../broker/registry.ts';
 import {
-  accountBalance,
   completeAuthorization,
   configuredEnvironments,
   environment,
   hasAccessToken,
   hasConsumerCredentials,
-  listAccounts,
-  listTransactions,
-  portfolioPositions,
   renewIfStale,
   revokeAccessToken,
   scopedName,
   setEnvironment,
   startAuthorization
 } from '../data/etrade.ts';
-import { money, out } from '../math/decimal.ts';
+import { div, gtZero, money, out, ZERO } from '../math/decimal.ts';
 import {
   attempt,
   cell,
@@ -167,10 +165,10 @@ export function registerBrokerTools(server: McpServer): void {
         const blocked = await requireConnection();
         if (blocked) return blocked;
 
-        const accounts = await listAccounts();
+        const accounts = await brokerAdapter().accounts();
         if (accounts.length === 0) {
           return text(
-            `No accounts came back from E*TRADE (${environment()}). If this is the ` +
+            `No accounts came back from ${brokerAdapter().label()}. If this is the ` +
               'production environment, confirm the consumer key belongs to the same ' +
               'login as the brokerage account.'
           );
@@ -179,13 +177,13 @@ export function registerBrokerTools(server: McpServer): void {
         const rows = accounts
           .map(
             account =>
-              `| \`${account.accountIdKey}\` | ${account.accountId} | ${account.accountType} | ` +
-              `${account.accountDesc || account.accountName} | ${account.accountStatus} |`
+              `| \`${account.id}\` | ${account.number} | ${account.type} | ` +
+              `${account.description} | ${account.status} |`
           )
           .join('\n');
 
         return text(
-          `## E*TRADE accounts (${environment()})\n\n` +
+          `## Accounts (${brokerAdapter().label()})\n\n` +
             '| Account ID key | Account | Type | Description | Status |\n|---|---|---|---|---|\n' +
             `${rows}\n\nPass the account ID key — the first column — to \`etrade_positions\`.`
         );
@@ -212,59 +210,89 @@ export function registerBrokerTools(server: McpServer): void {
         const blocked = await requireConnection();
         if (blocked) return blocked;
 
-        const portfolio = await portfolioPositions(accountIdKey);
-        // Balances come from a different endpoint than positions, and the two
-        // can disagree when a trade has settled but not yet cleared — showing
-        // both is more honest than picking one.
-        const balance = await accountBalance(accountIdKey);
-        const holdings = portfolio.positions.map(position => ({
+        // Netting is the adapter's job now — every broker reports lots
+        // rather than positions, and a consumer that had to remember would
+        // eventually forget. What stays here is the long-only filter, which is
+        // this server's policy rather than any broker's shape.
+        const adapter = brokerAdapter();
+        const [positions, balance] = await Promise.all([
+          adapter.positions(accountIdKey),
+          // Balances come from a different endpoint than positions, and the two
+          // can disagree when a trade has settled but not yet cleared — showing
+          // both is more honest than picking one.
+          adapter.balances(accountIdKey)
+        ]);
+
+        const holdings = sortBy(
+          positions.filter(position => gtZero(position.shares)),
+          position => position.ticker
+        ).map(position => ({
           asOf: position.asOf,
-          price: money(position.price),
-          shares: out(position.shares, 6),
+          price: money(position.price) ?? 0,
+          shares: out(position.shares, 6) ?? 0,
           ticker: position.ticker
         }));
 
-        const rows = portfolio.positions
+        const excluded = positions
+          .filter(position => !gtZero(position.shares))
           .map(
-            position =>
+            position => `${position.ticker} (net ${out(position.shares, 6)})`
+          );
+
+        const rows = sortBy(positions, position => position.ticker)
+          .map(position => {
+            const value = position.price.times(position.shares);
+            return (
               `| ${position.ticker} | ${out(position.shares, 6)} | ` +
-              `${usd(money(position.price))} | ${cell(money(position.pricePaid) === undefined ? undefined : usd(money(position.pricePaid)))} | ` +
-              `${usd(money(position.marketValue))} | ${usd(money(position.totalCost))} | ` +
-              `${usd(money(position.totalGain))} | ` +
-              // E*TRADE sends these percentages already scaled to 0-100.
-              `${cell(out(position.totalGainPct, 2), '%')} | ` +
-              `${cell(money(position.daysGain) === undefined ? undefined : usd(money(position.daysGain)))} | ` +
-              `${cell(out(position.pctOfPortfolio, 2), '%')} | ${position.asOf} |`
-          )
+              `${usd(money(position.price))} | ${usd(money(value))} | ` +
+              `${cell(money(position.costBasis) === undefined ? undefined : usd(money(position.costBasis)))} | ` +
+              `${cell(money(position.unrealisedGain) === undefined ? undefined : usd(money(position.unrealisedGain)))} | ` +
+              `${position.asOf} |`
+            );
+          })
           .join('\n');
 
         return text(
-          `## E*TRADE portfolio — ${accountIdKey} (${environment()})\n\n` +
-            (portfolio.positions.length > 0
-              ? '| Ticker | Shares | Price | Paid | Market value | Cost | Gain | Gain % | Day | % of book | Price as of |\n' +
-                `|---|---|---|---|---|---|---|---|---|---|---|\n${rows}\n\n`
+          `## Portfolio — ${accountIdKey} (${adapter.label()})\n\n` +
+            (positions.length > 0
+              ? '| Ticker | Shares | Price | Market value | Cost basis | Unrealised | Price as of |\n' +
+                `|---|---|---|---|---|---|---|\n${rows}\n\n`
               : 'No equity positions in this account.\n\n') +
-            `Cash available for investment: **${usd(money(balance.cash))}**. ` +
-            `Net cash ${usd(money(balance.netCash))}; total account value ` +
-            `${usd(money(balance.totalValue ?? portfolio.totalValue))} ` +
+            `Cash available for investment: **${usd(money(balance.cashAvailable))}**. ` +
+            `Total account value ${cell(money(balance.totalValue) === undefined ? undefined : usd(money(balance.totalValue)))} ` +
             `as of ${balance.asOf}.\n\n` +
             '### For `plan_rebalance`\n\n' +
-            `Pass this as \`holdings\`, and ${money(balance.cash) ?? 0} as ` +
+            `Pass this as \`holdings\`, and ${money(balance.cashAvailable) ?? 0} as ` +
             '`availableCash`:\n\n' +
             `\`\`\`json\n${JSON.stringify(holdings, undefined, 2)}\n\`\`\`\n\n` +
+            (excluded.length > 0
+              ? `**Excluded from that block:** ${excluded.join(', ')}. Multiple ` +
+                'lots of a symbol are netted first, and anything not net long is ' +
+                'left out — this server screens long-only value, and a negative ' +
+                'share count is out of scope rather than silently rebalanced.\n\n'
+              : '') +
             (() => {
               // Equal weight is the strategy, so a position that has run away
               // from its neighbours is the thing a Schloss book most wants
-              // surfaced — and it is invisible in a share count.
-              const heaviest = portfolio.positions
-                .filter(position => position.pctOfPortfolio !== undefined)
-                .toSorted(
-                  (a, b) =>
-                    (out(b.pctOfPortfolio) ?? 0) - (out(a.pctOfPortfolio) ?? 0)
-                )[0];
-              const weight = out(heaviest?.pctOfPortfolio);
-              return weight !== undefined && weight > 10 && heaviest
-                ? `Largest position: **${heaviest.ticker}** at ${pct(weight / 100)} of the ` +
+              // surfaced — and it is invisible in a share count. Derived here
+              // rather than read from the broker: not every broker reports a
+              // portfolio weight, and one that does may exclude cash.
+              const total = positions.reduce(
+                (sum, position) =>
+                  sum.plus(position.price.times(position.shares)),
+                ZERO
+              );
+              if (!gtZero(total)) return '';
+
+              const heaviest = sortBy(positions, position =>
+                position.price.times(position.shares).neg().toNumber()
+              )[0];
+              const weight = heaviest
+                ? out(div(heaviest.price.times(heaviest.shares), total))
+                : undefined;
+
+              return weight !== undefined && weight > 0.1 && heaviest
+                ? `Largest position: **${heaviest.ticker}** at ${pct(weight)} of the ` +
                     'book. Equal weight is the method here, and a name that has ' +
                     'run past its neighbours is a decision to make, not a ' +
                     'position to leave alone.\n\n'
@@ -348,6 +376,18 @@ export function registerBrokerTools(server: McpServer): void {
                     'connection works and nothing else — never read a real number ' +
                     'from it.\n\n'
                   : '') +
+                '### Brokers configured\n\n' +
+                configuredBrokers()
+                  .map(
+                    entry =>
+                      `- \`${entry.id}\` — ${entry.label}: ` +
+                      `${entry.configured ? 'ready' : 'no credentials'}`
+                  )
+                  .join('\n') +
+                '\n\nAlpaca is the better unattended choice where you have the ' +
+                'option: static API keys, so no midnight expiry and no verifier ' +
+                'to type. E*TRADE cannot be read by a scheduled job across a day ' +
+                'boundary at all.\n\n' +
                 'Access tokens are stored per environment, so connecting one does ' +
                 'not disconnect the other.' +
                 DISCLAIMER
@@ -374,31 +414,22 @@ export function registerBrokerTools(server: McpServer): void {
         const blocked = await requireConnection();
         if (blocked) return blocked;
 
-        const balance = await accountBalance(accountIdKey);
+        const adapter = brokerAdapter();
+        const balance = await adapter.balances(accountIdKey);
         const calls = money(balance.openCalls);
 
         return text(
-          `## E*TRADE balances — ${balance.accountDescription ?? accountIdKey}` +
-            ` (${environment()})\n\n` +
-            `${balance.accountType ? `${balance.accountType} account · ` : ''}` +
-            `as of **${balance.asOf}**\n\n` +
+          `## Balances — ${accountIdKey} (${adapter.label()})\n\n` +
+            `As of **${balance.asOf}**\n\n` +
             (calls !== undefined && calls > 0
               ? `> **Open margin call of ${usd(calls)}.** That outranks every figure ` +
                 'below: the broker can liquidate positions to meet it, and cash ' +
                 'shown as available may not be yours to deploy.\n\n'
               : '') +
             '| Figure | Amount |\n|---|---|\n' +
-            moneyRow('Cash available to invest', balance.cash) +
-            moneyRow('Settled cash', balance.settledCash) +
-            moneyRow('Unsettled cash', balance.unsettledCash) +
-            moneyRow('Cash available to withdraw', balance.cashForWithdrawal) +
-            moneyRow('Net cash', balance.netCash) +
-            moneyRow('Cash balance', balance.cashBalance) +
-            moneyRow('Cash buying power', balance.cashBuyingPower) +
-            moneyRow('Margin buying power', balance.marginBuyingPower) +
-            moneyRow('Margin balance', balance.marginBalance) +
-            moneyRow('Long market value', balance.netMarketValue) +
-            moneyRow('Account balance', balance.accountBalance) +
+            moneyRow('Cash available to invest', balance.cashAvailable) +
+            moneyRow('Cash balance', balance.cashTotal) +
+            moneyRow('Open margin calls', balance.openCalls) +
             moneyRow('Total account value', balance.totalValue) +
             '\n' +
             'For sizing a screen, **cash available to invest** is the figure that ' +
@@ -458,11 +489,10 @@ export function registerBrokerTools(server: McpServer): void {
         const blocked = await requireConnection();
         if (blocked) return blocked;
 
-        const { more, transactions } = await listTransactions(accountIdKey, {
-          count,
-          endDate,
-          startDate
-        });
+        const { more, transactions } = await brokerAdapter().transactions(
+          accountIdKey,
+          { count, endDate, startDate }
+        );
 
         const wanted = symbol?.trim().toUpperCase();
         const shown = wanted
@@ -483,7 +513,7 @@ export function registerBrokerTools(server: McpServer): void {
         const rows = shown
           .map(
             item =>
-              `| ${item.transactionDate} | ${item.transactionType} | ` +
+              `| ${item.tradeDate} | ${item.type} | ` +
               `${cell(item.symbol)} | ${cell(out(item.quantity, 6))} | ` +
               `${cell(money(item.price) === undefined ? undefined : usd(money(item.price)))} | ` +
               `${cell(money(item.amount) === undefined ? undefined : usd(money(item.amount)))} | ` +
@@ -493,7 +523,7 @@ export function registerBrokerTools(server: McpServer): void {
           .join('\n');
 
         return text(
-          `## E*TRADE transactions — ${accountIdKey} (${environment()})\n\n` +
+          `## Transactions — ${accountIdKey}\n\n` +
             `${shown.length} row(s)${wanted ? ` for ${wanted}` : ''}` +
             `${startDate || endDate ? `, ${startDate ?? 'earliest'} to ${endDate ?? 'today'}` : ''}` +
             '.\n\n' +
@@ -560,7 +590,7 @@ async function finishConnect(verifier: string): Promise<ToolResult> {
   // then re-run the flow and burn another five-minute verifier for nothing.
   let summary: string;
   try {
-    const accounts = await listAccounts();
+    const accounts = await brokerAdapter().accounts();
     summary =
       `${accounts.length} account(s) visible. Call \`etrade_accounts\` for the ` +
       'account ID keys.';

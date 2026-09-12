@@ -127,3 +127,55 @@ describe('planRebalance', () => {
     expect(plan.notes.join(' ')).toContain('nothing to rebalance');
   });
 });
+
+describe('duplicate lots', () => {
+  it('nets multiple lots of the same ticker instead of dropping one', () => {
+    // A broker reports lots, not positions: E*TRADE returns a long and a short
+    // leg of the same symbol as separate rows. Keying off the array kept
+    // whichever came last and silently discarded the rest.
+    const plan = planRebalance({
+      availableCash: new Decimal(0),
+      holdings: [holding('AAA', 100, 10), holding('AAA', 40, 10)],
+      targets: [target('AAA', 1, 10)]
+    });
+
+    // 140 shares at 10 is the whole portfolio, so it is already on target.
+    expect(plan.portfolioValue).toBe(1400);
+    expect(plan.buys).toHaveLength(0);
+    expect(plan.sells).toHaveLength(0);
+  });
+
+  it('nets a long and a short leg to the correct position', () => {
+    const plan = planRebalance({
+      availableCash: new Decimal(0),
+      holdings: [holding('AAA', 100, 10), holding('AAA', -40, 10)],
+      targets: [target('AAA', 1, 10)]
+    });
+
+    expect(plan.portfolioValue).toBe(600);
+  });
+
+  it('takes the price of the most recently marked lot', () => {
+    // A stale mark is the worse of the two, so the newest date wins.
+    const plan = planRebalance({
+      availableCash: new Decimal(0),
+      holdings: [
+        {
+          asOf: '2020-01-01',
+          price: new Decimal(5),
+          shares: new Decimal(10),
+          ticker: 'AAA'
+        },
+        {
+          asOf: '2026-09-11',
+          price: new Decimal(20),
+          shares: new Decimal(10),
+          ticker: 'AAA'
+        }
+      ],
+      targets: [target('AAA', 1, 20)]
+    });
+
+    expect(plan.portfolioValue).toBe(400);
+  });
+});

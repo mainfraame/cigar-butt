@@ -1,4 +1,4 @@
-import { keyBy, sortBy, sumBy } from 'lodash-es';
+import { groupBy, keyBy, sortBy, sumBy } from 'lodash-es';
 
 import {
   Decimal,
@@ -86,6 +86,32 @@ const asUsd = (value: Decimal): string =>
     style: 'currency'
   });
 
+/**
+ * Nets multiple lots of the same ticker into one position.
+ *
+ * A broker reports lots, not positions: E*TRADE returns a long and a short leg
+ * of the same symbol as separate rows. Keying straight off the array would keep
+ * whichever came last and silently discard the rest — a holding vanishing from
+ * a rebalance without a word is exactly the failure this codebase exists to
+ * avoid. The price of the most recently marked lot wins, because a stale mark
+ * is the worse of the two.
+ */
+function mergeHoldings(holdings: readonly Holding[]): Holding[] {
+  return Object.values(groupBy(holdings, holding => holding.ticker)).map(
+    lots => {
+      const newest = sortBy(lots, lot => lot.asOf).at(-1);
+      /* c8 ignore next -- groupBy never produces an empty group. */
+      if (!newest) throw new Error('empty holding group');
+      return {
+        asOf: newest.asOf,
+        price: newest.price,
+        shares: lots.reduce((total, lot) => total.plus(lot.shares), ZERO),
+        ticker: newest.ticker
+      };
+    }
+  );
+}
+
 function roundShares(value: Decimal, fractional: boolean): Decimal {
   return fractional
     ? value.toDecimalPlaces(4, Decimal.ROUND_DOWN)
@@ -111,10 +137,14 @@ export function planRebalance(input: RebalanceInput): RebalancePlan {
 
   const notes: string[] = [];
 
-  const holdingsByTicker = keyBy(holdings, holding => holding.ticker);
+  // Merge once and use the result everywhere. Valuing raw lots while comparing
+  // merged positions would price the same book two different ways inside one
+  // function.
+  const merged = mergeHoldings(holdings);
+  const holdingsByTicker = keyBy(merged, holding => holding.ticker);
   const targetsByTicker = keyBy(targets, target => target.ticker);
 
-  const holdingsValue = holdings.reduce(
+  const holdingsValue = merged.reduce(
     (total, holding) => total.plus(holding.shares.times(holding.price)),
     ZERO
   );

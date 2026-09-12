@@ -42,8 +42,10 @@ It is a flat JSON object keyed by the environment-variable names below:
   "TIINGO_API_KEY": "…",
   "POLYGON_API_KEY": "…",
   "ALPHAVANTAGE_API_KEY": "…",
-  "ALPACA_API_KEY_ID": "…",
-  "ALPACA_API_SECRET_KEY": "…",
+  "ALPACA_PAPER_API_KEY_ID": "…",
+  "ALPACA_PAPER_API_SECRET_KEY": "…",
+  "ALPACA_LIVE_API_KEY_ID": "…",
+  "ALPACA_LIVE_API_SECRET_KEY": "…",
   "EODHD_API_KEY": "…",
   "FINNHUB_API_KEY": "…",
   "TWELVEDATA_API_KEY": "…",
@@ -103,17 +105,17 @@ against the documented limits below and checked before a request goes out.
 
 `provider_status` shows consumption and can clear recorded caps.
 
-| Provider                | Variable                | Free tier                                                     |
-| ----------------------- | ----------------------- | ------------------------------------------------------------- |
-| Tiingo                  | `TIINGO_API_KEY`        | ~50 unique tickers/hour, 500 requests/day on the free tier    |
-| Polygon.io              | `POLYGON_API_KEY`       | 5 calls/minute, end-of-day data, ~2 years of history on Basic |
-| Alpha Vantage           | `ALPHAVANTAGE_API_KEY`  | ~25 requests/day, 5 calls/minute                              |
-| Alpaca (key ID)         | `ALPACA_API_KEY_ID`     | 200 requests/minute on the free Basic plan                    |
-| Alpaca (secret key)     | `ALPACA_API_SECRET_KEY` | —                                                             |
-| EOD Historical Data     | `EODHD_API_KEY`         | 20 requests/day on the free tier                              |
-| Finnhub                 | `FINNHUB_API_KEY`       | 60 calls/minute, no daily cap                                 |
-| Twelve Data             | `TWELVEDATA_API_KEY`    | 800 requests/day, 8/minute                                    |
-| Financial Modeling Prep | `FMP_API_KEY`           | 250 requests/day; free tier restricted to large caps          |
+| Provider                  | Variable                      | Free tier                                                     |
+| ------------------------- | ----------------------------- | ------------------------------------------------------------- |
+| Tiingo                    | `TIINGO_API_KEY`              | ~50 unique tickers/hour, 500 requests/day on the free tier    |
+| Polygon.io                | `POLYGON_API_KEY`             | 5 calls/minute, end-of-day data, ~2 years of history on Basic |
+| Alpha Vantage             | `ALPHAVANTAGE_API_KEY`        | ~25 requests/day, 5 calls/minute                              |
+| Alpaca paper (key ID)     | `ALPACA_PAPER_API_KEY_ID`     | 200 requests/minute on the free Basic plan                    |
+| Alpaca paper (secret key) | `ALPACA_PAPER_API_SECRET_KEY` | —                                                             |
+| EOD Historical Data       | `EODHD_API_KEY`               | 20 requests/day on the free tier                              |
+| Finnhub                   | `FINNHUB_API_KEY`             | 60 calls/minute, no daily cap                                 |
+| Twelve Data               | `TWELVEDATA_API_KEY`          | 800 requests/day, 8/minute                                    |
+| Financial Modeling Prep   | `FMP_API_KEY`                 | 250 requests/day; free tier restricted to large caps          |
 
 ### Tiingo
 
@@ -145,11 +147,11 @@ Fundamentals cross-check (OVERVIEW, BALANCE_SHEET) and a last-resort quote. Too 
 
 **Sign up:** https://www.alphavantage.co/support/#api-key
 
-### Alpaca (key ID)
+### Alpaca paper (key ID)
 
-`ALPACA_API_KEY_ID` — Price pool
+`ALPACA_PAPER_API_KEY_ID` — Price pool
 
-Quotes, with by far the most headroom of any free tier here — 200 a minute against Tiingo’s 50 an hour. Needs a paper-trading account, which is free and takes no card, and requires ALPACA_API_SECRET_KEY alongside it. Note the free plan carries the IEX feed rather than the consolidated tape, so its prices differ slightly from other providers and a thin micro cap may not have printed on IEX at all.
+Quotes, with by far the most headroom of any free tier here — 200 a minute against Tiingo’s 50 an hour — and a paper brokerage account the portfolio tools can read. Free, no card. Requires ALPACA_PAPER_API_SECRET_KEY alongside it. The free plan carries the IEX feed rather than the consolidated tape, so quotes differ slightly from other providers and a thin micro cap may not have printed on IEX at all.
 
 **Free tier:** 200 requests/minute on the free Basic plan
 
@@ -158,15 +160,16 @@ Quotes, with by far the most headroom of any free tier here — 200 a minute aga
 **How to get one:**
 
 1. Sign up at https://alpaca.markets/ — a paper-trading account is free and needs no card or funding.
-2. Open the dashboard and generate an API key; you get a Key ID and a Secret Key, shown once.
-3. Set ALPACA_API_KEY_ID and ALPACA_API_SECRET_KEY. Both are required.
-4. The free plan carries the IEX feed rather than the full consolidated tape. Expect small differences against other providers, and treat a thinly-traded name with care — IEX is about 2% of US volume, so it may not have printed at all that session. Fine for a screen; not for execution.
+2. Generate an API key in the dashboard. You get a Key ID (starting "PK" for paper) and a Secret Key, and the secret is shown ONCE — regenerate the pair rather than hunting for a lost one.
+3. Set ALPACA_PAPER_API_KEY_ID and ALPACA_PAPER_API_SECRET_KEY. Both are required; half a pair is an error rather than a silent fallback.
+4. For a funded account, use the ALPACA_LIVE_* pair instead and switch with ALPACA_ENVIRONMENT=live. A live key starts "AK", and pointing a paper key at the live host (or the reverse) is caught with a clear error.
+5. The unscoped ALPACA_API_KEY_ID / ALPACA_API_SECRET_KEY still work as a fallback for either environment, so an existing setup keeps running.
 
-### Alpaca (secret key)
+### Alpaca paper (secret key)
 
-`ALPACA_API_SECRET_KEY` — Price pool
+`ALPACA_PAPER_API_SECRET_KEY` — Price pool
 
-Issued alongside the Alpaca key ID; both are needed.
+Issued with the paper key ID; both are needed.
 
 **Sign up:** https://alpaca.markets/
 
@@ -211,6 +214,22 @@ Quotes — but its free tier covers LARGE CAPS ONLY. Verified: AAPL and MSFT ans
 **Sign up:** https://site.financialmodelingprep.com/developer/docs
 
 ## Optional integrations
+
+### Alpaca live (key ID)
+
+`ALPACA_LIVE_API_KEY_ID` — Optional
+
+A funded Alpaca account. Read-only here — this server never places an order — but it reads a real book, so it is kept separate from the paper pair rather than sharing one slot.
+
+**Sign up:** https://alpaca.markets/
+
+### Alpaca live (secret key)
+
+`ALPACA_LIVE_API_SECRET_KEY` — Optional
+
+Issued with the live key ID; both are needed.
+
+**Sign up:** https://alpaca.markets/
 
 ### E*TRADE sandbox consumer key
 

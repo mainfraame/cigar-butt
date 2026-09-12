@@ -101,40 +101,61 @@ export const PROVIDERS: readonly ProviderSpec[] = [
     signupUrl: 'https://www.alphavantage.co/support/#api-key'
   },
   {
-    envVar: 'ALPACA_API_KEY_ID',
+    envVar: 'ALPACA_PAPER_API_KEY_ID',
     group: 'prices',
     id: 'alpaca',
-    label: 'Alpaca (key ID)',
+    label: 'Alpaca paper (key ID)',
     purpose:
       'Quotes, with by far the most headroom of any free tier here — 200 a ' +
-      'minute against Tiingo\u2019s 50 an hour. Needs a paper-trading account, ' +
-      'which is free and takes no card, and requires ALPACA_API_SECRET_KEY ' +
-      'alongside it. Note the free plan carries the IEX feed rather than the ' +
-      'consolidated tape, so its prices differ slightly from other providers ' +
-      'and a thin micro cap may not have printed on IEX at all.',
+      'minute against Tiingo\u2019s 50 an hour — and a paper brokerage account ' +
+      'the portfolio tools can read. Free, no card. Requires ' +
+      'ALPACA_PAPER_API_SECRET_KEY alongside it. The free plan carries the IEX ' +
+      'feed rather than the consolidated tape, so quotes differ slightly from ' +
+      'other providers and a thin micro cap may not have printed on IEX at all.',
     rateLimit: '200 requests/minute on the free Basic plan',
     requirement: 'one-of',
     setupSteps: [
       'Sign up at https://alpaca.markets/ — a paper-trading account is free ' +
         'and needs no card or funding.',
-      'Open the dashboard and generate an API key; you get a Key ID and a ' +
-        'Secret Key, shown once.',
-      'Set ALPACA_API_KEY_ID and ALPACA_API_SECRET_KEY. Both are required.',
-      'The free plan carries the IEX feed rather than the full consolidated ' +
-        'tape. Expect small differences against other providers, and treat a ' +
-        'thinly-traded name with care — IEX is about 2% of US volume, so it may ' +
-        'not have printed at all that session. Fine for a screen; not for ' +
-        'execution.'
+      'Generate an API key in the dashboard. You get a Key ID (starting "PK" ' +
+        'for paper) and a Secret Key, and the secret is shown ONCE — regenerate ' +
+        'the pair rather than hunting for a lost one.',
+      'Set ALPACA_PAPER_API_KEY_ID and ALPACA_PAPER_API_SECRET_KEY. Both are ' +
+        'required; half a pair is an error rather than a silent fallback.',
+      'For a funded account, use the ALPACA_LIVE_* pair instead and switch with ' +
+        'ALPACA_ENVIRONMENT=live. A live key starts "AK", and pointing a paper ' +
+        'key at the live host (or the reverse) is caught with a clear error.',
+      'The unscoped ALPACA_API_KEY_ID / ALPACA_API_SECRET_KEY still work as a ' +
+        'fallback for either environment, so an existing setup keeps running.'
     ],
     signupUrl: 'https://alpaca.markets/'
   },
   {
-    envVar: 'ALPACA_API_SECRET_KEY',
+    envVar: 'ALPACA_PAPER_API_SECRET_KEY',
     group: 'prices',
-    id: 'alpaca-secret',
-    label: 'Alpaca (secret key)',
-    purpose: 'Issued alongside the Alpaca key ID; both are needed.',
+    id: 'alpaca-paper-secret',
+    label: 'Alpaca paper (secret key)',
+    purpose: 'Issued with the paper key ID; both are needed.',
     requirement: 'one-of',
+    signupUrl: 'https://alpaca.markets/'
+  },
+  {
+    envVar: 'ALPACA_LIVE_API_KEY_ID',
+    id: 'alpaca-live-key',
+    label: 'Alpaca live (key ID)',
+    purpose:
+      'A funded Alpaca account. Read-only here — this server never places an ' +
+      'order — but it reads a real book, so it is kept separate from the paper ' +
+      'pair rather than sharing one slot.',
+    requirement: 'optional',
+    signupUrl: 'https://alpaca.markets/'
+  },
+  {
+    envVar: 'ALPACA_LIVE_API_SECRET_KEY',
+    id: 'alpaca-live-secret',
+    label: 'Alpaca live (secret key)',
+    purpose: 'Issued with the live key ID; both are needed.',
+    requirement: 'optional',
     signupUrl: 'https://alpaca.markets/'
   },
   {

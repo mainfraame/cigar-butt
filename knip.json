@@ -7,6 +7,13 @@
   // does not parse — without this it reads as an unused devDependency.
   "ignoreDependencies": ["eslint-plugin-perfectionist"],
 
+  // Types in the two contract files are the API an adapter author writes
+  // against. Nothing imports them by name because adapters satisfy them
+  // structurally, but un-exporting would make an adapter's own return types
+  // unnameable. Value exports in these files are still checked.
+  "ignoreExportsUsedInFile": true,
+  "ignore": [],
+
   "vitest": {
     "config": ["vitest.config.ts"],
     "entry": ["src/**/*.test.ts"]

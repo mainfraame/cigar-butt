@@ -240,37 +240,3 @@ export function scanDisqualifiers(
     summary: summaryText
   };
 }
-
-/**
- * Form 4 code-P purchases. Not a Schloss tool — he ignored management — but a
- * record of where insiders put their own money is not management telling you
- * anything. Only the count is derivable from the filing index; the transaction
- * codes live inside each document, so this reports cadence, not conviction.
- */
-export function insiderFilingActivity(
-  summary: SubmissionsSummary,
-  {
-    lookbackDays = 180,
-    now = new Date()
-  }: { lookbackDays?: number; now?: Date } = {}
-): { count: number; lateFilings: number; note: string } {
-  const cutoff = new Date(now.getTime() - lookbackDays * DAY_MS)
-    .toISOString()
-    .slice(0, 10);
-
-  const forms = summary.events.filter(
-    event => event.form === '4' && event.filingDate >= cutoff
-  );
-
-  // A "4/A" is an amendment; a pattern of them alongside late filings is a
-  // compliance-sloppiness flag in its own right.
-  const lateFilings = summary.events.filter(
-    event => event.form === '4/A' && event.filingDate >= cutoff
-  ).length;
-
-  return {
-    count: forms.length,
-    lateFilings,
-    note: 'Form 4 counts only. Transaction codes are inside each document: only code P (open-market purchase) carries signal, and F (shares withheld for tax) is routinely and wrongly read as a sale. Fetch the individual filings before drawing a conclusion.'
-  };
-}

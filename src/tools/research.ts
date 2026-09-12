@@ -3,10 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/server';
 import { sortBy } from 'lodash-es';
 import * as z from 'zod/v4';
 
-import {
-  insiderFilingActivity,
-  scanDisqualifiers
-} from '../analysis/disqualifiers.ts';
+import { scanDisqualifiers } from '../analysis/disqualifiers.ts';
 import {
   type DatedValue,
   computeMetrics,
@@ -17,6 +14,11 @@ import {
 } from '../analysis/metrics.ts';
 import { quotes } from '../data/prices.ts';
 import { resolveTicker, submissions } from '../data/sec.ts';
+import {
+  configuredJurisdictions,
+  filingsAdapter,
+  guessJurisdiction
+} from '../filings/registry.ts';
 import { dec, out } from '../math/decimal.ts';
 import {
   attempt,
@@ -46,6 +48,14 @@ export function registerResearchTools(server: McpServer): void {
         'Costs one request. Run this BEFORE any valuation work — a name that fails ' +
         'here is dead regardless of how cheap it looks, and no ratio would catch it.',
       inputSchema: z.object({
+        jurisdiction: z
+          .enum(['JP', 'UK', 'US'])
+          .optional()
+          .describe(
+            'Which registry to ask. Omit to guess from the identifier: a UK ' +
+              'company number and a Tokyo ticker are recognised, and anything ' +
+              'else falls back to the US.'
+          ),
         lookbackDays: z
           .number()
           .int()
@@ -53,41 +63,68 @@ export function registerResearchTools(server: McpServer): void {
           .max(3650)
           .default(730)
           .describe(
-            'How far back to scan. Restatements from a decade ago are history.'
+            'How far back to scan. Restatements from a decade ago are history. ' +
+              'US only — the UK register states a current status, and EDINET is ' +
+              'searched by filing date.'
           ),
         ticker: tickerArg
       }),
-      title: 'Scan filing index for disqualifiers'
+      title: 'Scan registry filings for disqualifiers'
     },
-    ({ lookbackDays, ticker }) =>
+    ({ jurisdiction, ticker }) =>
       attempt(async () => {
-        const blocked = requireCapabilities('sec');
-        if (blocked) return blocked;
+        const where = jurisdiction ?? guessJurisdiction(ticker);
 
-        const entry = await resolveTicker(ticker);
-        const summary = await submissions(String(entry.cik_str));
-        const report = scanDisqualifiers(summary, { lookbackDays });
-        const insiders = insiderFilingActivity(summary);
+        // Only the US path needs a credential this server treats as required;
+        // the others report their own missing key through the adapter.
+        if (where === 'US') {
+          const blocked = requireCapabilities('sec');
+          if (blocked) return blocked;
+        }
+
+        const adapter = filingsAdapter(where);
+        if (!adapter.isConfigured()) {
+          const configured = configuredJurisdictions()
+            .map(
+              entry =>
+                `- ${entry.jurisdiction}: ${entry.label} — ` +
+                `${entry.configured ? 'ready' : 'no credential'}`
+            )
+            .join('\n');
+          return text(
+            `${adapter.label} has no credential configured, so "${ticker}" cannot ` +
+              `be checked against it.\n\n${configured}\n\n` +
+              'Run `setup_status` for sign-up links, or pass a different ' +
+              '`jurisdiction`.' +
+              DISCLAIMER
+          );
+        }
+
+        const company = await adapter.resolve(ticker);
+        const report = await adapter.disqualifiers(company.id);
 
         const rows = report.flags
           .map(
             flag =>
-              `| ${flag.severity} | ${flag.form} | ${flag.date} | ${flag.reason} | \`${flag.source}\` |`
+              `| ${flag.severity} | ${flag.label} | ${cell(flag.date)} | ` +
+              `${flag.detail} | ${cell(flag.source && `\`${flag.source}\``)} |`
           )
           .join('\n');
 
         return text(
-          `## ${summary.name} (${entry.ticker}) — disqualifier scan\n\n` +
-            `CIK ${summary.cik} · SIC ${cell(summary.sic)} ${summary.sicDescription ?? ''} · ` +
-            `Exchanges: ${summary.exchanges.join(', ') || '—'}\n\n` +
+          `## ${report.company.name} — disqualifier scan\n\n` +
+            `${adapter.label} · id \`${report.company.id}\`` +
+            `${report.company.ticker ? ` · ${report.company.ticker}` : ''}` +
+            `${report.company.sic ? ` · SIC ${report.company.sic}` : ''}\n\n` +
             `**${report.summary}**\n\n` +
             (report.flags.length > 0
-              ? `| Severity | Form | Filed | Finding | Accession |\n|---|---|---|---|---|\n${rows}\n\n`
+              ? '| Severity | Finding | Date | Detail | Source |\n' +
+                `|---|---|---|---|---|\n${rows}\n\n`
               : '') +
-            `Last periodic report: ${report.lastPeriodicFiling?.form ?? '—'} filed ` +
-            `${report.lastPeriodicFiling?.date ?? '—'} (${cell(report.daysSinceLastPeriodic)} days ago).\n\n` +
-            `Form 4 filings in the last 180 days: ${insiders.count} (${insiders.lateFilings} amendments). ` +
-            `${insiders.note}` +
+            'A finding marked `disqualify` ends the analysis: the whole thesis is ' +
+            'that the reported balance sheet is true, and these say it is not. ' +
+            'One marked `investigate` means read the filing before trusting the ' +
+            'numbers.' +
             DISCLAIMER
         );
       })

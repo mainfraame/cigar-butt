@@ -26,19 +26,29 @@ import { attempt, text, type ToolResult } from './shared.ts';
 
 /** One optional string field per provider, built from the registry. */
 const credentialForm = z.object({
-  ALPACA_API_KEY_ID: z
+  ALPACA_LIVE_API_KEY_ID: z
+    .string()
+    .optional()
+    .meta({ title: 'Alpaca LIVE key ID — funded account (optional)' }),
+  ALPACA_LIVE_API_SECRET_KEY: z
+    .string()
+    .optional()
+    .meta({ title: 'Alpaca LIVE secret key (optional)' }),
+  ALPACA_PAPER_API_KEY_ID: z
     .string()
     .optional()
     .meta({
       description:
-        'Quotes with the most free headroom here (200/min). Free paper-trading ' +
-        'account, no card: https://alpaca.markets/',
-      title: 'Alpaca key ID (optional)'
+        'Quotes with the most free headroom here (200/min), plus a paper ' +
+        'brokerage account the portfolio tools can read. Free, no card: ' +
+        'https://alpaca.markets/ — the key ID starts "PK" and the secret is ' +
+        'shown only once.',
+      title: 'Alpaca paper key ID (optional)'
     }),
-  ALPACA_API_SECRET_KEY: z
+  ALPACA_PAPER_API_SECRET_KEY: z
     .string()
     .optional()
-    .meta({ title: 'Alpaca secret key (optional)' }),
+    .meta({ title: 'Alpaca paper secret key (optional)' }),
   ALPHAVANTAGE_API_KEY: z
     .string()
     .optional()

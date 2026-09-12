@@ -363,11 +363,17 @@ export function setEnvironment(next: EtradeEnvironment): {
 } {
   saveCredentials({ [ENV_ENVIRONMENT]: next });
 
-  for (const name of [ENV_ENVIRONMENT, ENV_ENVIRONMENT_ALIAS]) {
-    const exported = process.env[name]?.trim().toLowerCase();
-    if (exported && exported !== next) return { shadowedBy: name };
-  }
-  return {};
+  // Ask whether the switch actually took, rather than guessing which variable
+  // might override it. Enumerating candidates got this wrong: once
+  // ETRADE_ENVIRONMENT is stored it always satisfies the first lookup, so an
+  // exported ETRADE_ENV can never shadow it — yet the old check reported it as
+  // the culprit and sent the user chasing a variable with no effect.
+  if (environment() === next) return {};
+
+  const culprit = [ENV_ENVIRONMENT, ENV_ENVIRONMENT_ALIAS].find(
+    name => process.env[name] !== undefined
+  );
+  return { shadowedBy: culprit ?? ENV_ENVIRONMENT };
 }
 
 /** Which environments have a usable consumer key pair. */
