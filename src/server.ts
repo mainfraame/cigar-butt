@@ -7,6 +7,7 @@ import { registerCacheTools } from './tools/cache.ts';
 import { registerCongressTools } from './tools/congress.ts';
 import { registerJapanTools } from './tools/japan.ts';
 import { registerMarketTools } from './tools/market.ts';
+import { registerOwnershipTools } from './tools/ownership.ts';
 import { registerPortfolioTools } from './tools/portfolio.ts';
 import { registerResearchTools } from './tools/research.ts';
 import { registerSetupTools } from './tools/setup.ts';
@@ -40,8 +41,11 @@ Order of operations, which matters more than any single tool:
 5. \`check_corporate_actions\` before pairing a filing's share count with a
    price. A split between those two dates makes every per-share figure wrong by
    the split factor, and a reverse split makes a name look cheap by exactly it.
-6. \`short_interest\` to answer "why is it cheap?" with a fact rather than a
-   narrative. It is context, not a veto.
+6. \`short_interest\` and \`ownership_activity\` to answer "why is it cheap?"
+   with a fact rather than a narrative. Between them they say who is betting
+   against the name and who is buying it. Context, not a veto — and on a Form
+   4 only codes \`P\` and \`S\` are trades at all; a grant is compensation and
+   withholding is not a sale.
 7. \`build_allocation\` only for names actually verified above. A weighting
    implies a level of diligence a screen does not provide.
 8. \`broker_positions\` when the user has a brokerage account, rather than
@@ -121,6 +125,7 @@ export function createServer(): McpServer {
   registerResearchTools(server);
   registerMarketTools(server);
   registerPortfolioTools(server);
+  registerOwnershipTools(server);
   registerTechnicalTools(server);
   registerBrokerTools(server);
   registerCongressTools(server);

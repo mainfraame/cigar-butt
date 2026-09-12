@@ -76,6 +76,15 @@ pnpm 11+ reads its supply-chain settings from there rather than `.npmrc`.
   actually work on a bank, where EV and net cash do not.
 - `src/data/fred.ts` — Moody's Aaa, the 10-year, and CPI. Feeds Graham's
   earnings-yield hurdle.
+- `src/data/ownership.ts` — Forms 3 and 4 and Schedules 13D/13G, for "who is
+  acting on this?". Two distinctions carry the module. Only transaction codes
+  `P` and `S` are trades at the market price: `A` is a grant and `F` is tax
+  withholding, and summing rows rather than codes manufactures insider buying
+  out of routine compensation. And 13D reserves the right to influence control
+  while 13G declares the holder passive — at a name below NCAV that difference
+  is usually an argument about the cash. `parseFiledBy` reads the filer from
+  the SGML header, taking the `FILED BY` block rather than the first
+  `COMPANY CONFORMED NAME`, which is the subject company.
 - `src/data/reference.ts` — Polygon listing status, splits and dividends.
   Catches a split between the balance-sheet date and today, which silently makes
   every per-share figure wrong by the split factor.

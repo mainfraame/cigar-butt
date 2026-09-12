@@ -72,6 +72,8 @@ export const CACHE_NAMESPACES = [
   'quote',
   'sec-concept',
   'sec-frames',
+  'sec-ownership',
+  'sec-stake-header',
   'sec-submissions',
   'sec-tickers'
 ] as const;
