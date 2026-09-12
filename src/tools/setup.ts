@@ -26,10 +26,32 @@ import { attempt, text, type ToolResult } from './shared.ts';
 
 /** One optional string field per provider, built from the registry. */
 const credentialForm = z.object({
+  ALPACA_API_KEY_ID: z
+    .string()
+    .optional()
+    .meta({
+      description:
+        'Quotes with the most free headroom here (200/min). Free paper-trading ' +
+        'account, no card: https://alpaca.markets/',
+      title: 'Alpaca key ID (optional)'
+    }),
+  ALPACA_API_SECRET_KEY: z
+    .string()
+    .optional()
+    .meta({ title: 'Alpaca secret key (optional)' }),
   ALPHAVANTAGE_API_KEY: z
     .string()
     .optional()
     .meta({ title: 'Alpha Vantage API key (optional)' }),
+  EODHD_API_KEY: z
+    .string()
+    .optional()
+    .meta({
+      description:
+        'The only non-US quote coverage here. Free tier is 20 calls/day. ' +
+        'https://eodhd.com/register',
+      title: 'EOD Historical Data API key (optional)'
+    }),
   ETRADE_PROD_CONSUMER_KEY: z
     .string()
     .optional()

@@ -101,6 +101,51 @@ export const PROVIDERS: readonly ProviderSpec[] = [
     signupUrl: 'https://www.alphavantage.co/support/#api-key'
   },
   {
+    envVar: 'ALPACA_API_KEY_ID',
+    group: 'prices',
+    id: 'alpaca',
+    label: 'Alpaca (key ID)',
+    purpose:
+      'Quotes, with by far the most headroom of any free tier here. Needs a ' +
+      'paper-trading account, which is free and takes no card. Requires ' +
+      'ALPACA_API_SECRET_KEY alongside it.',
+    rateLimit: '200 requests/minute on the free Basic plan; IEX feed',
+    requirement: 'one-of',
+    setupSteps: [
+      'Sign up at https://alpaca.markets/ — a paper-trading account is free ' +
+        'and needs no card or funding.',
+      'Open the dashboard and generate an API key; you get a Key ID and a ' +
+        'Secret Key, shown once.',
+      'Set ALPACA_API_KEY_ID and ALPACA_API_SECRET_KEY. Both are required.',
+      'The free plan carries the IEX feed rather than full SIP, so a quote is ' +
+        'IEX-only. For a screen that is fine; for execution it is not.'
+    ],
+    signupUrl: 'https://alpaca.markets/'
+  },
+  {
+    envVar: 'ALPACA_API_SECRET_KEY',
+    group: 'prices',
+    id: 'alpaca-secret',
+    label: 'Alpaca (secret key)',
+    purpose: 'Issued alongside the Alpaca key ID; both are needed.',
+    requirement: 'one-of',
+    signupUrl: 'https://alpaca.markets/'
+  },
+  {
+    envVar: 'EODHD_API_KEY',
+    group: 'prices',
+    id: 'eodhd',
+    label: 'EOD Historical Data',
+    purpose:
+      'Quotes for **non-US listings** — the one source here that covers them, ' +
+      'which matters because net-nets have been scarcer in the US than in ' +
+      'Japan and Korea for a decade. Pass an exchange-suffixed ticker such as ' +
+      '7203.TSE. Its free tier is the tightest in the pool, so it is tried last.',
+    rateLimit: '20 requests/day on the free tier',
+    requirement: 'one-of',
+    signupUrl: 'https://eodhd.com/register'
+  },
+  {
     envVar: 'FINNHUB_API_KEY',
     group: 'prices',
     id: 'finnhub',

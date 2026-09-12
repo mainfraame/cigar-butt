@@ -6,6 +6,7 @@ import * as z from 'zod/v4';
 import { findInstitutions, latestCallReport } from '../data/fdic.ts';
 import { shortInterest } from '../data/finra.ts';
 import { fredConfigured, macroSnapshot } from '../data/fred.ts';
+import { fxCurrencies, fxRate } from '../data/fx.ts';
 import { dividends, splits, tickerReference } from '../data/reference.ts';
 import { dec, out } from '../math/decimal.ts';
 import { attempt, cell, DISCLAIMER, pct, text, usd } from './shared.ts';
@@ -346,6 +347,71 @@ export function registerMarketTools(server: McpServer): void {
             'ways.' +
             DISCLAIMER
         );
+      })
+  );
+
+  server.registerTool(
+    'fx_rate',
+    {
+      annotations: { openWorldHint: true, readOnlyHint: true },
+      description:
+        'Exchange rate between two currencies, from the European Central ' +
+        "Bank's daily reference rates via Frankfurter. No credential, no cap. " +
+        'Needed whenever a screen leaves the US — a balance sheet in yen cannot ' +
+        'be compared against a dollar cash balance without one. Pass a date to ' +
+        'get a historical rate, which is what a return calculation across ' +
+        'currencies requires.',
+      inputSchema: z.object({
+        base: z
+          .string()
+          .length(3)
+          .describe('ISO currency code to convert FROM, e.g. "USD".'),
+        on: z
+          .string()
+          .regex(/^\d{4}-\d{2}-\d{2}$/, 'ISO date, e.g. 2026-01-02')
+          .optional()
+          .describe(
+            'Rate as of this date. Omit for the latest. Weekends and holidays ' +
+              'return the last published rate before them.'
+          ),
+        quote: z
+          .string()
+          .length(3)
+          .describe('ISO currency code to convert TO, e.g. "JPY".')
+      }),
+      title: 'Exchange rate'
+    },
+    ({ base, on, quote }) =>
+      attempt(async () => {
+        try {
+          const result = await fxRate(base, quote, on);
+          const inverse = dec(1)?.div(result.rate);
+
+          return text(
+            `## ${result.base}/${result.quote}\n\n` +
+              `**1 ${result.base} = ${out(result.rate, 6)} ${result.quote}** ` +
+              `as of ${result.asOf}` +
+              (on && on !== result.asOf
+                ? ` (asked for ${on}; that day published no rate, so the last ` +
+                  'one before it is shown)'
+                : '') +
+              `\n\n1 ${result.quote} = ${out(inverse, 6)} ${result.base}\n\n` +
+              'ECB reference rates are published once each business day around ' +
+              '16:00 CET. They are a reference, not a dealable price, and the ' +
+              'spread you would actually pay is not in this number.' +
+              DISCLAIMER
+          );
+        } catch (error) {
+          const known = await fxCurrencies().catch(() => ({}));
+          const codes = Object.keys(known);
+          return text(
+            `${error instanceof Error ? error.message : String(error)}\n\n` +
+              (codes.length > 0
+                ? `Currencies published: ${codes.join(', ')}.`
+                : '') +
+              DISCLAIMER
+          );
+        }
       })
   );
 }

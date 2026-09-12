@@ -1,4 +1,5 @@
 import { cached, TTL } from '../cache/store.ts';
+import { getCredential } from '../config/store.ts';
 import { fetchJson } from '../http/client.ts';
 import {
   poolStatus,
@@ -255,18 +256,92 @@ const finnhub: Provider<Quote> = {
   }
 };
 
+const alpaca: Provider<Quote> = {
+  // 200 requests/minute on the free Basic plan — by a distance the most
+  // headroom of anything here, which makes it a strong primary for a wide
+  // screen. Paid plans reach 10,000/min.
+  budgets: [{ limit: 200, per: 'minute' }],
+  id: 'alpaca',
+  label: 'Alpaca',
+  quotaCooldownSeconds: 60,
+  requestsPerSecond: 3,
+  run: async (ticker, key, rate) => {
+    // Alpaca is the one provider here needing two credentials. The pool joins
+    // on the key id, so the secret is read directly.
+    const secret = getCredential('ALPACA_API_SECRET_KEY');
+    if (!secret) {
+      throw new Error(
+        'ALPACA_API_KEY_ID is set but ALPACA_API_SECRET_KEY is not; Alpaca needs both.'
+      );
+    }
+
+    const data = await fetchJson<{ bar?: { c?: number; t?: string } }>(
+      `https://data.alpaca.markets/v2/stocks/${encodeURIComponent(ticker)}/bars/latest`,
+      {
+        headers: { 'APCA-API-KEY-ID': key, 'APCA-API-SECRET-KEY': secret },
+        rateKey: 'data.alpaca.markets',
+        requestsPerSecond: rate,
+        // The free plan carries the IEX feed only; asking for SIP without a
+        // subscription is rejected rather than downgraded.
+        searchParams: { feed: 'iex' }
+      }
+    );
+    return toQuote('alpaca', ticker, data.bar?.c, data.bar?.t);
+  }
+};
+
+const eodhd: Provider<Quote> = {
+  // 20 calls/day is the tightest budget in the pool, so it sits last and acts
+  // as a genuine last resort. It earns its place by covering non-US listings,
+  // which nothing else here does.
+  budgets: [{ limit: 20, per: 'day' }],
+  id: 'eodhd',
+  label: 'EOD Historical Data',
+  quotaCooldownSeconds: 6 * 60 * 60,
+  requestsPerSecond: 1,
+  run: async (ticker, key, rate) => {
+    // An unsuffixed ticker is assumed US; a caller wanting Tokyo passes
+    // "7203.TSE" and it is forwarded untouched.
+    const symbol = ticker.includes('.') ? ticker : `${ticker}.US`;
+    const rows = await fetchJson<
+      { adjusted_close?: Num; close?: Num; date?: string }[]
+    >(`https://eodhd.com/api/eod/${encodeURIComponent(symbol)}`, {
+      rateKey: 'eodhd.com',
+      requestsPerSecond: rate,
+      searchParams: {
+        api_token: key,
+        fmt: 'json',
+        order: 'd',
+        period: 'd'
+      }
+    });
+    const row = rows[0];
+    return toQuote(
+      'eodhd',
+      ticker,
+      row?.adjusted_close ?? row?.close,
+      row?.date
+    );
+  }
+};
+
 /**
  * Declared order is the fallback order, best-trusted first. A user can put the
  * service they pay for at the front with CIGAR_BUTT_PROVIDER_ORDER.
  */
 const QUOTE_PROVIDERS: readonly Provider<Quote>[] = [
   tiingo,
+  alpaca,
   polygon,
   finnhub,
   twelvedata,
   fmp,
-  alphavantage
+  alphavantage,
+  eodhd
 ];
+
+/** Test seam: lets the budget declarations be asserted without exporting the pool. */
+export const QUOTE_PROVIDERS_FOR_TEST = QUOTE_PROVIDERS;
 
 /* ----------------------------------------------------------------- public */
 

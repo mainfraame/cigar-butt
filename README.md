@@ -341,7 +341,7 @@ testing.
 | `api/xbrl/frames`         | One concept across every filer in a period. This is the market-wide screen                                                       |
 | `submissions`             | The filing index, including the 8-K `items` array that makes the disqualifier checks a structured lookup rather than a news read |
 
-Prices come from Tiingo, then Polygon, then Alpha Vantage, in that order.
+Prices come from a failover pool of eight providers; see below.
 Every failure is reported when all three fail, so "no key", "bad ticker" and
 "rate limited" stay distinguishable.
 
@@ -359,14 +359,16 @@ Quote providers are a **failover pool**, not a fixed chain. A request tries them
 in order and skips any that has no key, is cooling down, or has spent its
 budget. That is what makes a screen of any size survivable on free tiers.
 
-| Provider                | Free tier                                        | Notes                                   |
-| ----------------------- | ------------------------------------------------ | --------------------------------------- |
-| Tiingo                  | 50/hour, 1,000/day, **500 unique symbols/month** | Split- and dividend-adjusted. Best data |
-| Polygon.io              | 5/minute, no daily cap                           | Every paid tier is unlimited            |
-| Finnhub                 | 60/minute, no daily cap                          | Most generous free quote tier           |
-| Twelve Data             | 8/minute, 800/day                                | Carries an explicit trade date          |
-| Financial Modeling Prep | 250/day                                          | Extends the pool when others are spent  |
-| Alpha Vantage           | 5/minute, **25/day**                             | Effectively a spot-check                |
+| Provider                | Free tier                                        | Notes                                         |
+| ----------------------- | ------------------------------------------------ | --------------------------------------------- |
+| Tiingo                  | 50/hour, 1,000/day, **500 unique symbols/month** | Split- and dividend-adjusted. Best data       |
+| Polygon.io              | 5/minute, no daily cap                           | Every paid tier is unlimited                  |
+| Finnhub                 | 60/minute, no daily cap                          | Most generous free quote tier                 |
+| Twelve Data             | 8/minute, 800/day                                | Carries an explicit trade date                |
+| Financial Modeling Prep | 250/day                                          | Extends the pool when others are spent        |
+| Alpha Vantage           | 5/minute, **25/day**                             | Effectively a spot-check                      |
+| Alpaca                  | 200/minute, no daily cap                         | Most headroom of any free tier here. IEX feed |
+| EOD Historical Data     | 20/day                                           | The only **non-US** coverage. Pass `7203.TSE` |
 
 **Usage is counted locally and checked before a request goes out**, against each
 service's documented limits — not inferred from a 429 afterwards. On a daily cap
@@ -396,6 +398,17 @@ throttled to free speed:
 
 `provider_status` shows every provider's key, rate, budget consumption and
 cooldown, and can clear recorded caps.
+
+### Sources needing no credential at all
+
+| Source                   | Used by                                                  | Notes                              |
+| ------------------------ | -------------------------------------------------------- | ---------------------------------- |
+| SEC EDGAR                | `analyze_ticker`, `check_disqualifiers`, `screen_market` | Needs a contact string, not a key  |
+| FINRA                    | `short_interest`                                         | Consolidated short interest        |
+| FDIC BankFind            | `bank_call_report`                                       | Bank call reports                  |
+| Senate eFD / House Clerk | all `congress_*` tools                                   | Official disclosures               |
+| congress-legislators     | committee cross-reference                                | Committee and subcommittee rosters |
+| Frankfurter (ECB)        | `fx_rate`                                                | Daily reference exchange rates     |
 
 ## Caching
 

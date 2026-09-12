@@ -34,6 +34,13 @@ function stub(
   };
 }
 
+/** A provider's daily call budget, or Infinity when it declares none. */
+function dailyLimit(provider: Provider<unknown>): number {
+  return (
+    provider.budgets.find(budget => budget.per === 'day')?.limit ?? Infinity
+  );
+}
+
 const ok = (value: string) => () => Promise.resolve(value);
 const boom = (message: string) => () => Promise.reject(new Error(message));
 const rateLimited = () => () =>
@@ -314,5 +321,33 @@ describe('usage windows', () => {
 
     sweepUsage();
     expect(budgetsFor(provider)[0]?.used).toBe(1);
+  });
+});
+
+describe('quote provider declarations', () => {
+  it('declares a budget for every provider in the pool', async () => {
+    // A provider with no declared budget is invisible to the accounting and
+    // will run until the service rejects it — the reactive failure this
+    // module exists to avoid.
+    const { QUOTE_PROVIDERS_FOR_TEST } = await import('./prices.ts');
+    for (const provider of QUOTE_PROVIDERS_FOR_TEST) {
+      expect(
+        provider.budgets.length,
+        `${provider.id} declares no budget`
+      ).toBeGreaterThan(0);
+      for (const budget of provider.budgets) {
+        expect(budget.limit, `${provider.id} ${budget.per}`).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it('orders the pool so the tightest free tier is tried last', async () => {
+    const { QUOTE_PROVIDERS_FOR_TEST } = await import('./prices.ts');
+
+    const last = QUOTE_PROVIDERS_FOR_TEST.at(-1);
+    const smallest = Math.min(
+      ...QUOTE_PROVIDERS_FOR_TEST.map(provider => dailyLimit(provider))
+    );
+    expect(last && dailyLimit(last)).toBe(smallest);
   });
 });
