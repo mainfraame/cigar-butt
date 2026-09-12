@@ -67,7 +67,14 @@ export function extractItem(text: string, item: string): string | undefined {
   // them 4, so a terminator demanding a decimal runs a 13D section to the end
   // of the document — which is how Item 4, the one that says what an activist
   // wants, came back buried in fourteen thousand characters.
-  const next = /Item\s+\d+(\.\d+)?/gi;
+  //
+  // The lookbehind matters as much. Items incorporate each other constantly —
+  // "the information included in Item 1.01 above is incorporated herein by
+  // reference" — and treating that cross-reference as the next heading cut
+  // Standard BioTools' change-of-control disclosure off after eleven words,
+  // at the exact point where it said where the substance lives.
+  const next =
+    /(?<!\b(?:in|to|under|see|of|with|from|and|or|per)\s)Item\s+\d+(\.\d+)?/gi;
   next.lastIndex = start[0].length;
   const match = next.exec(rest);
 

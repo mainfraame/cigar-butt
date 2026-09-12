@@ -159,3 +159,29 @@ describe('isHeadingOnly', () => {
     expect(isHeadingOnly('Item 3.01', '3.01')).toBe(true);
   });
 });
+
+describe('extractItem across cross-references', () => {
+  const eightK =
+    'Item 5.01 Changes in Control of Registrant. To the extent required by ' +
+    'this Item, the information included in Item 1.01 above is incorporated ' +
+    'herein by reference. Item 5.02 Departure of Directors.';
+
+  it('does not stop at an item mentioned inside a sentence', () => {
+    // 8-K items incorporate each other constantly, and treating the
+    // cross-reference as a heading cut this disclosure off after eleven
+    // words — at the exact point where it said where the substance lives.
+    const section = extractItem(eightK, '5.01');
+
+    expect(section).toContain('incorporated herein by reference');
+    expect(section).not.toContain('Departure of Directors');
+  });
+
+  it('still stops at the next real heading', () => {
+    expect(extractItem(eightK, '5.01')).not.toContain('Item 5.02');
+  });
+
+  it('keeps the cross-referenced number visible in the text', () => {
+    // The reader needs to know which item to go and read next.
+    expect(extractItem(eightK, '5.01')).toContain('Item 1.01');
+  });
+});
