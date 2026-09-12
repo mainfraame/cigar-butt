@@ -216,7 +216,13 @@ export function fetchText(
 ): Promise<string> {
   return fetchJson<string>(baseUrl, {
     ...options,
-    headers: { accept: 'text/html,application/xhtml+xml', ...options.headers },
+    // The trailing `*/*` matters. A server that content-negotiates strictly
+    // answers 406 rather than sending something outside the list, and the
+    // House Clerk does exactly that for its XML index.
+    headers: {
+      accept: 'text/html,application/xhtml+xml,*/*;q=0.1',
+      ...options.headers
+    },
     parse: 'text'
   });
 }

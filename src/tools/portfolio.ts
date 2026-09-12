@@ -21,31 +21,83 @@ import {
 import type { Order } from '../portfolio/rebalance.ts';
 
 /** Renders one side of a rebalance plan; empty sections are omitted entirely. */
-function orderTable(
+export function orderTable(
   title: string,
   orders: readonly Order[],
   { withGain = false }: { withGain?: boolean } = {}
 ): string {
   if (orders.length === 0) return '';
 
+  // Columns appear only when there is something to put in them. Participation
+  // needs `averageDailyVolume` on the holding and fees are sell-side only, so
+  // a fixed layout would print a column of em-dashes on most plans — and an
+  // em-dash where a cost belongs reads as "zero cost" to a hurried eye.
+  const showParticipation = orders.some(
+    order => order.participation !== undefined
+  );
+  const showFees = orders.some(
+    order => order.estimatedFees !== undefined && order.estimatedFees > 0
+  );
+
   const rows = orders
     .map(order => {
-      const base =
-        `| ${order.ticker} | ${order.shares} | ${usd(order.price)} | ` +
-        `${usd(order.estimatedProceeds)} | ${usd(order.currentValue)} | ` +
-        `${usd(order.targetValue)} | ${pct(order.driftFraction)} | ${order.asOf} |`;
-      return withGain
-        ? `${base} ${cell(order.costBasis === undefined ? undefined : usd(order.costBasis))} | ` +
-            `${cell(order.gainOnExit === undefined ? undefined : usd(order.gainOnExit))} |`
-        : base;
+      const cells = [
+        order.ticker,
+        String(order.shares),
+        usd(order.price),
+        usd(order.estimatedProceeds),
+        ...(showParticipation
+          ? [
+              order.participation === undefined
+                ? cell(undefined)
+                : pct(order.participation)
+            ]
+          : []),
+        ...(showFees
+          ? [
+              order.estimatedFees === undefined
+                ? cell(undefined)
+                : usd(order.estimatedFees)
+            ]
+          : []),
+        usd(order.currentValue),
+        usd(order.targetValue),
+        pct(order.driftFraction),
+        order.asOf,
+        ...(withGain
+          ? [
+              cell(
+                order.costBasis === undefined ? undefined : usd(order.costBasis)
+              ),
+              cell(
+                order.gainOnExit === undefined
+                  ? undefined
+                  : usd(order.gainOnExit)
+              )
+            ]
+          : [])
+      ];
+      return `| ${cells.join(' | ')} |`;
     })
     .join('\n');
 
-  const head = withGain
-    ? '| Ticker | Shares | Price | Notional | Now | Target | Drift | As of | Cost basis | Gain |\n' +
-      '|---|---|---|---|---|---|---|---|---|---|\n'
-    : '| Ticker | Shares | Price | Notional | Now | Target | Drift | As of |\n' +
-      '|---|---|---|---|---|---|---|---|\n';
+  const headings = [
+    'Ticker',
+    'Shares',
+    'Price',
+    'Notional',
+    ...(showParticipation ? ['Session %'] : []),
+    ...(showFees ? ['Statutory fees'] : []),
+    'Now',
+    'Target',
+    'Drift',
+    'As of',
+    ...(withGain ? ['Cost basis', 'Gain'] : [])
+  ];
+
+  const head =
+    `| ${headings.join(' | ')} |\n` +
+    `|${headings.map(() => '---').join('|')}|\n`;
 
   return `### ${title}\n\n${head}${rows}\n\n`;
 }
@@ -307,7 +359,27 @@ export function registerPortfolioTools(server: McpServer): void {
                 'this method: a name that has closed its discount has done its job, ' +
                 'and holding it past that point is a different decision than the one ' +
                 'that bought it.' +
-                COST_NOTE +
+                // The note explains figures. With none on the page it is
+                // boilerplate pointing at nothing — and the useful reply is
+                // the one input that produces the figure.
+                (() => {
+                  const orders = [...plan.sells, ...plan.exits, ...plan.buys];
+                  const hasCost = orders.some(
+                    order =>
+                      order.participation !== undefined ||
+                      (order.estimatedFees !== undefined &&
+                        order.estimatedFees > 0)
+                  );
+                  return hasCost
+                    ? COST_NOTE
+                    : '\n\n*No order carries a participation figure. Pass ' +
+                        '`averageDailyVolume` on each holding — ' +
+                        '`price_history_stats` reports it — to learn what share ' +
+                        'of a normal session each order would be. That is the ' +
+                        'execution cost that actually matters on a thin name, ' +
+                        'and it is the only part of it computable from any ' +
+                        'source configured here.*';
+                })() +
                 TAX_NOTE +
                 DISCLAIMER
             )

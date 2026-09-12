@@ -494,7 +494,12 @@ export async function houseFilings({
     async () => {
       const xml = await fetchText(
         `https://disclosures-clerk.house.gov/public_disc/financial-pdfs/${year}FD.xml`,
-        HOUSE_RATE
+        {
+          ...HOUSE_RATE,
+          // Asking for XML explicitly, because this endpoint returns 406 to
+          // an Accept list that does not name a type it can serve.
+          headers: { accept: 'application/xml,text/xml;q=0.9,*/*;q=0.8' }
+        }
       );
 
       return [...xml.matchAll(/<Member>(.*?)<\/Member>/gs)].flatMap(match => {
