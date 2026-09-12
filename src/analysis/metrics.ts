@@ -2,6 +2,7 @@ import { maxBy, sortBy } from 'lodash-es';
 
 import {
   companyConcept,
+  CONCEPT_ALTERNATES,
   CONCEPTS,
   COVER_SHARES,
   type CompanyFact,
@@ -44,6 +45,8 @@ export interface BalanceSheet {
   readonly preferredStock?: DatedValue;
   readonly receivables?: DatedValue;
   readonly sharesOutstanding?: DatedValue;
+  /** Treasuries and the like. Liquidity the cash line does not carry. */
+  readonly shortTermInvestments?: DatedValue;
   readonly stockholdersEquity?: DatedValue;
 }
 
@@ -133,7 +136,15 @@ export async function fetchBalanceSheet(
 
   const facts: Partial<Record<keyof typeof CONCEPTS, CompanyFact[]>> = {};
   for (const [key, concept] of entries) {
-    facts[key] = await companyConcept(cik, concept);
+    const alternates = CONCEPT_ALTERNATES[key] ?? [concept];
+    // First tag that returns anything wins. Filers differ and a concept that
+    // is absent under one name is routinely present under another.
+    let found: CompanyFact[] = [];
+    for (const candidate of alternates) {
+      if (found.length > 0) break;
+      found = await companyConcept(cik, candidate);
+    }
+    facts[key] = found;
   }
 
   const periodEnd = ANCHOR_CONCEPTS.map(
@@ -211,7 +222,16 @@ export function computeMetrics(sheet: BalanceSheet): ValueMetrics {
   const currentAssets = val(sheet.assetsCurrent);
   const currentLiabilities = val(sheet.liabilitiesCurrent);
   const totalLiabilities = val(sheet.liabilities);
-  const cash = val(sheet.cash);
+  // Liquidity, not the cash line. A company parking money in Treasuries
+  // reports part of it under short-term investments, and reading only
+  // `CashAndCashEquivalents` understates net cash — one of the five checks.
+  // Undefined plus a number is the number: a filer that tags neither has no
+  // liquidity figure, and one that tags only one has that one.
+  const cash =
+    val(sheet.cash) === undefined &&
+    val(sheet.shortTermInvestments) === undefined
+      ? undefined
+      : (val(sheet.cash) ?? ZERO).plus(val(sheet.shortTermInvestments) ?? ZERO);
   const shares = val(sheet.sharesOutstanding);
 
   const goodwill = orZero(sheet.goodwill);

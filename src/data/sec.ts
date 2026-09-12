@@ -38,8 +38,28 @@ export const CONCEPTS = {
   preferredStock: 'PreferredStockValue',
   receivables: 'AccountsReceivableNetCurrent',
   sharesOutstanding: 'CommonStockSharesOutstanding',
+  shortTermInvestments: 'ShortTermInvestments',
   stockholdersEquity: 'StockholdersEquity'
 } as const;
+
+/**
+ * Concepts filers tag under more than one name, tried in order.
+ *
+ * Money parked in Treasuries is the case that matters. A company holding
+ * $167M of liquidity may report only a fraction of it as
+ * `CashAndCashEquivalents` and the rest as short-term investments, under any
+ * of several tags. Reading the first tag alone understates net cash — which
+ * is one of the five checks — and made Medifast look like it held $72M when
+ * its own activist put the figure at $167M.
+ */
+export const CONCEPT_ALTERNATES: Readonly<Record<string, readonly string[]>> = {
+  shortTermInvestments: [
+    'ShortTermInvestments',
+    'MarketableSecuritiesCurrent',
+    'AvailableForSaleSecuritiesDebtSecuritiesCurrent',
+    'OtherShortTermInvestments'
+  ]
+};
 
 export interface CompanyFact {
   /** Accession number of the filing this figure came from. */

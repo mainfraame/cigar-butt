@@ -14,7 +14,7 @@ vi.mock('../data/sec.ts', async importOriginal => {
   };
 });
 
-const { fetchBalanceSheet } = await import('./metrics.ts');
+const { computeMetrics, fetchBalanceSheet } = await import('./metrics.ts');
 
 const ACCN = '0001628280-26-052652';
 
@@ -106,5 +106,48 @@ describe('fetchBalanceSheet share count', () => {
     const { sheet } = await fetchBalanceSheet('216085');
 
     expect(sheet.sharesOutstanding).toBeUndefined();
+  });
+});
+
+describe('liquidity beyond the cash line', () => {
+  it('adds short-term investments to cash', async () => {
+    // Medifast reported $71.9M of cash while its own activist put liquidity
+    // at $167M — the rest was parked in Treasuries. Reading the cash line
+    // alone understates net cash, which is one of the five checks.
+    facts.set('us-gaap:CashAndCashEquivalentsAtCarryingValue', [
+      fact('2026-06-30', 71_910_000)
+    ]);
+    facts.set('us-gaap:ShortTermInvestments', [fact('2026-06-30', 95_000_000)]);
+    facts.set('us-gaap:LongTermDebtNoncurrent', []);
+
+    const { sheet } = await fetchBalanceSheet('910329');
+    const metrics = computeMetrics(sheet);
+
+    expect(metrics.netCash?.toString()).toBe('166910000');
+  });
+
+  it('falls through to another tag for the same concept', async () => {
+    // Filers differ: a concept absent under one name is routinely present
+    // under another, and the first that answers wins.
+    facts.set('us-gaap:CashAndCashEquivalentsAtCarryingValue', [
+      fact('2026-06-30', 10_000_000)
+    ]);
+    facts.set('us-gaap:MarketableSecuritiesCurrent', [
+      fact('2026-06-30', 40_000_000)
+    ]);
+
+    const { sheet } = await fetchBalanceSheet('910329');
+
+    expect(sheet.shortTermInvestments?.value.toString()).toBe('40000000');
+  });
+
+  it('reports no liquidity when neither tag is present', async () => {
+    // Not zero. A filer that tags neither has no figure, and zero would fail
+    // the net-cash check on evidence that does not exist.
+    const { sheet } = await fetchBalanceSheet('910329');
+    const metrics = computeMetrics(sheet);
+
+    expect(sheet.cash).toBeUndefined();
+    expect(metrics.netCash).toBeUndefined();
   });
 });
