@@ -214,9 +214,12 @@ export function registerResearchTools(server: McpServer): void {
         // reason to fail the analysis.
         // Graham's asset test assumes the assets survive the wait. This is
         // the check that says whether they will.
+        // Liquidity, not the cash line: Fulgent holds $26.3M of cash beside
+        // $230.7M of Treasuries, and measuring the cash line alone called a
+        // balance sheet that is 56% spendable a working-capital business.
         const burn = await burnProfile(
           cik,
-          sheet.cash?.value,
+          metrics.liquidity,
           sheet.assetsCurrent?.value,
           metrics.ncav
         );

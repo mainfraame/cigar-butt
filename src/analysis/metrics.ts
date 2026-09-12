@@ -55,6 +55,15 @@ export interface ValueMetrics {
   readonly asOf: string;
   readonly currentRatio?: Decimal;
   readonly debtToEquity?: Decimal;
+  /**
+   * Cash plus short-term investments, before subtracting debt.
+   *
+   * The figure every liquidity question wants. `netCash` nets off long-term
+   * debt and the raw `cash` line omits Treasuries, so neither answers "how
+   * much of this balance sheet is spendable" — which is what decides whether
+   * a runway means anything.
+   */
+  readonly liquidity?: Decimal;
   /** Line items the filer never tagged. Each one weakens a test below. */
   readonly missing: readonly string[];
   /** Current assets − total liabilities − preferred. Graham's net-net base. */
@@ -283,6 +292,7 @@ export function computeMetrics(sheet: BalanceSheet): ValueMetrics {
       ? div(currentAssets, currentLiabilities)
       : undefined,
     debtToEquity: gtZero(equity) ? div(longTermDebt, equity) : undefined,
+    liquidity: cash,
     missing,
     ncav,
     ncavPerShare: perShare(ncav),

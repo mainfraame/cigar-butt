@@ -213,3 +213,29 @@ describe('anomalous periods', () => {
     expect(profile.burnPeriod?.months).toBe(6);
   });
 });
+
+describe('liquidity decides the cash-box test', () => {
+  it('treats Treasuries as spendable when classifying the balance sheet', async () => {
+    // Fulgent holds $26.3M of cash beside $230.7M of short-term investments
+    // inside $454.8M of current assets. Measuring the cash line alone put it
+    // at 5.8% and called a balance sheet that is 56% spendable a
+    // working-capital business.
+    facts.set(FLOW, [fact('2026-01-01', '2026-06-30', -16_661_000, '10-Q')]);
+
+    const onCashLine = await burnProfile(
+      '1674930',
+      dec(26_305_000),
+      dec(454_770_000),
+      dec(361_533_000)
+    );
+    const onLiquidity = await burnProfile(
+      '1674930',
+      dec(257_032_000),
+      dec(454_770_000),
+      dec(361_533_000)
+    );
+
+    expect(onCashLine.runwayYears).toBeUndefined();
+    expect(Number(onLiquidity.runwayYears?.toFixed(1))).toBeCloseTo(7.7, 1);
+  });
+});
