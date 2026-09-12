@@ -5,6 +5,7 @@ import { renderSetup, startupBanner } from './setup/report.ts';
 import { registerBrokerTools } from './tools/broker.ts';
 import { registerCacheTools } from './tools/cache.ts';
 import { registerCongressTools } from './tools/congress.ts';
+import { registerFilingTools } from './tools/filings.ts';
 import { registerJapanTools } from './tools/japan.ts';
 import { registerMarketTools } from './tools/market.ts';
 import { registerOwnershipTools } from './tools/ownership.ts';
@@ -33,7 +34,10 @@ Order of operations, which matters more than any single tool:
 2. \`screen_market\` or a candidate list the user supplies. Never generate
    tickers from memory; valuations move, and a list assembled from training data
    will be confidently wrong in exactly the way that costs money.
-3. \`check_disqualifiers\` on each candidate, BEFORE any valuation work. A name
+3. \`check_disqualifiers\` on each candidate, BEFORE any valuation work. When
+   it reports an \`investigate\` finding, \`read_filing\` returns the text —
+   item 3.01 covers both losing compliance and regaining it, so the index
+   alone cannot tell you which happened. A name
    with an 8-K item 4.02, a Form 25, or a filing gap is dead regardless of how
    cheap it looks, and no ratio catches that.
 4. \`analyze_ticker\` on the survivors. Every figure it returns carries the
@@ -124,6 +128,7 @@ export function createServer(): McpServer {
   registerSetupTools(server);
   registerResearchTools(server);
   registerMarketTools(server);
+  registerFilingTools(server);
   registerPortfolioTools(server);
   registerOwnershipTools(server);
   registerTechnicalTools(server);

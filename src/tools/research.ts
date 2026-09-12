@@ -3,6 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/server';
 import { sortBy } from 'lodash-es';
 import * as z from 'zod/v4';
 
+import { burnProfile } from '../analysis/burn.ts';
 import { scanDisqualifiers } from '../analysis/disqualifiers.ts';
 import {
   type DatedValue,
@@ -210,6 +211,10 @@ export function registerResearchTools(server: McpServer): void {
         // ADR, which silently multiplies every per-share figure. Best effort:
         // a missing or rate-limited vendor is a gap in the cross-check, not a
         // reason to fail the analysis.
+        // Graham's asset test assumes the assets survive the wait. This is
+        // the check that says whether they will.
+        const burn = await burnProfile(cik, sheet.cash?.value);
+
         const vendorShares = await attemptShares(entry.ticker);
         const shareCheck = checkShareCounts(
           sheet.sharesOutstanding?.stale === true
@@ -266,6 +271,58 @@ export function registerResearchTools(server: McpServer): void {
             `are about ${out(shareCheck.ratio, 3)}× what is shown. For a ` +
             'company funding itself by issuing shares this is not a rounding ' +
             'detail: it is the discount being consumed while you read.\n'
+          );
+        })();
+
+        const burnSection = (() => {
+          if (burn.selfFunding === undefined) {
+            return (
+              '### Are the assets being consumed?\n\nNo cash-flow ' +
+              'statement could be read, so this is unanswered — which is not ' +
+              'the same as "no". An asset test on a company burning its ' +
+              'balance sheet measures something that will not be there.\n\n'
+            );
+          }
+
+          const rows = [
+            ...burn.annualCashFlow.map(
+              period =>
+                `| Operating cash flow | ${usd(out(period.value, 0))} | ` +
+                `${period.from ?? '?'} to ${period.asOf} |`
+            ),
+            ...burn.revenue.map(
+              period =>
+                `| Revenue | ${usd(out(period.value, 0))} | ` +
+                `${period.from ?? '?'} to ${period.asOf} |`
+            )
+          ].join('\n');
+
+          return (
+            '### Are the assets being consumed?\n\n' +
+            (rows
+              ? `| Figure | Value | Period |\n|---|---|---|\n${rows}\n\n`
+              : '') +
+            (burn.selfFunding
+              ? '**Operations generate cash.** At the current run rate the ' +
+                `balance sheet is being added to, not spent: ${usd(out(burn.currentBurn, 0))} ` +
+                'a year annualised from the latest period. A discount on a ' +
+                'self-funding business is the case Graham\u2019s asset test was ' +
+                'written for — the assets are still there while you wait.\n\n'
+              : `**Operations consume cash** at about ${usd(out(burn.currentBurn?.abs(), 0))} ` +
+                'a year, annualised from the latest period rather than from ' +
+                'the last full year, because a company that has just lost a ' +
+                'trial or an exclusivity is not burning at last year\u2019s ' +
+                'rate.' +
+                (burn.runwayYears === undefined
+                  ? '\n\n'
+                  : ` That is **${out(burn.runwayYears, 1)} years** of runway ` +
+                    'against the cash on the balance sheet. Net current assets ' +
+                    'shrink by roughly that burn every year, so a discount to ' +
+                    'them is a wasting one — the question is whether the ' +
+                    'discount closes before the assets do.\n\n')) +
+            'Cash flow is from the statement, not derived from earnings. ' +
+            'Annualising an interim period assumes the rest of the year looks ' +
+            'like it has so far, which is an assumption, not a forecast.\n\n'
           );
         })();
 
@@ -328,7 +385,7 @@ export function registerResearchTools(server: McpServer): void {
               ? `Line items unavailable for this period, each weakening a test above: ${metrics.missing.join(', ')}.\n\n`
               : '') +
             (verdict
-              ? `### Verdict\n\n| Check | Result | Note |\n|---|---|---|\n${checkRows}\n\n` +
+              ? `${burnSection}### Verdict\n\n| Check | Result | Note |\n|---|---|---|\n${checkRows}\n\n` +
                 `Schloss criteria: **${verdict.passesSchloss ? 'pass' : 'fail'}**. ` +
                 `Graham net-net: **${verdict.passesGraham ? 'pass' : 'fail'}**.\n\n` +
                 'A check reading `n/a` could not be computed — that is a gap in the ' +

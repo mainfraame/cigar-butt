@@ -56,6 +56,19 @@ pnpm 11+ reads its supply-chain settings from there rather than `.npmrc`.
   has spent its locally-counted budget. Every `Quote` carries `asOf`.
 - `src/analysis/metrics.ts` — `fetchBalanceSheet`, `computeMetrics`, `judge`,
   `isFinancial`. The asset tests.
+- `src/analysis/burn.ts` — `burnProfile`, the melting-ice-cube test. Graham's
+  asset test assumes the assets survive the wait, and the screen ranked by
+  NCAV over tangible book actively selects for companies whose balance sheet is
+  nothing but cash — a pre-revenue business on its way to spending it. The burn
+  is annualised from the latest _interim_ period, not the last 10-K, because a
+  filer that has just lost a trial is not burning at last year's rate.
+  `selfFunding` is the three-state convention again, and `runwayYears` is
+  deliberately `undefined` for a cash-generative business: that is a different
+  situation, not an infinite runway.
+- `src/data/filing-text.ts` — `plainText`, `extractItem` and `filingText`. The
+  disqualifier scan ends by telling you to read something and this is what
+  reads it. `extractItem` must skip its own heading before hunting the next
+  one, since the terminator pattern matches the heading it started from.
 - `src/analysis/shares.ts` — `checkShareCounts`, the cross-check between the
   filing's share count and the vendor's. A price is quoted per _traded unit_,
   which for an ADR is not what the filing counts: Amarin's 10-Q reports

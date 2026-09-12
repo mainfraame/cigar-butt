@@ -251,10 +251,11 @@ candidate list for `analyze_ticker`, not a verdict.
 
 ### Check the name is not already dead
 
-| Tool                  | What it does                                                                                                                                           |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `check_disqualifiers` | One request against the SEC filing index: restatements, auditor changes, bankruptcy, delisting, late filings                                           |
-| `uk_company_status`   | The UK analogue, from the Companies House register: liquidation, administration, strike-off, overdue accounts, insolvency history, charges over assets |
+| Tool                  | What it does                                                                                                                                              |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `check_disqualifiers` | One request against the SEC filing index: restatements, auditor changes, bankruptcy, delisting, late filings                                              |
+| `read_filing`         | The text of a filing, optionally scoped to one 8-K item. Item 3.01 covers both losing listing compliance and regaining it — only the words tell you which |
+| `uk_company_status`   | The UK analogue, from the Companies House register: liquidation, administration, strike-off, overdue accounts, insolvency history, charges over assets    |
 
 Run these before any valuation work.
 

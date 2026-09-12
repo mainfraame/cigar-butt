@@ -61,6 +61,8 @@ export interface FilingEvent {
   /** 8-K item codes, split from the comma-separated `items` field. */
   readonly items: readonly string[];
   readonly primaryDocDescription?: string;
+  /** File name of the filing's main document, for fetching its text. */
+  readonly primaryDocument?: string;
   readonly reportDate?: string;
 }
 
@@ -90,6 +92,7 @@ interface SubmissionsResponse {
       form?: string[];
       items?: string[];
       primaryDocDescription?: string[];
+      primaryDocument?: string[];
       reportDate?: string[];
     };
   };
@@ -225,6 +228,7 @@ export async function submissions(cik: string): Promise<SubmissionsSummary> {
       .map(item => item.trim())
       .filter(item => item.length > 0),
     primaryDocDescription: recent.primaryDocDescription?.[index],
+    primaryDocument: recent.primaryDocument?.[index],
     reportDate: recent.reportDate?.[index]
   }));
 

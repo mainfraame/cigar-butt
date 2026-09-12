@@ -71,6 +71,7 @@ export const CACHE_NAMESPACES = [
   'polygon-ticker',
   'quote',
   'sec-concept',
+  'sec-filing-text',
   'sec-frames',
   'sec-ownership',
   'sec-stake-header',
