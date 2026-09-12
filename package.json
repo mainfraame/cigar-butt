@@ -31,7 +31,8 @@
     "dist",
     "docs",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "DISCLAIMER.md"
   ],
   "type": "module",
   "publishConfig": {

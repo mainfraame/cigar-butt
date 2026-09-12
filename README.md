@@ -1,45 +1,148 @@
 # cigar-butt
 
-An MCP server for Benjamin Graham and Walter Schloss deep-value stock screening.
+An MCP server that screens stocks against Benjamin Graham and Walter Schloss
+deep-value criteria, computing every figure from primary filings rather than
+from a commercial screener or from a language model's memory.
 
-It computes tangible book value, NCAV, NNWC and net cash **from SEC EDGAR XBRL
-filings**, runs the filing-index disqualifier checks that catch restatements and
-delistings before any valuation work, and turns verified candidates into
-equal-weight whole-share allocations and rebalance orders.
+It reads SEC EDGAR XBRL to build tangible book value, NCAV, NNWC and net cash;
+scans the filing index for restatements, bankruptcies and delistings _before_
+doing any valuation work; and turns whatever survives into equal-weight
+whole-share allocations and rebalance orders.
 
-The failure mode it exists to prevent is the obvious one: a language model
-producing a plausible list of tickers with plausible-looking ratios attached,
-assembled from training data rather than current filings. Valuations move. A
-name that traded at 0.7× tangible book six months ago may trade at 2× today, and
-a list built from memory will be confidently wrong in exactly the way that costs
-money. So every figure this server reports carries the filing it came from and
-the date it was filed, and a figure it cannot retrieve is reported as missing
-rather than estimated.
+The distinguishing claim is **provenance**. Every figure carries the filing it
+came from, the accession number and the date it was filed. A figure that could
+not be retrieved is reported as missing, never estimated. The failure mode this
+exists to prevent is the obvious one: a plausible list of tickers with
+plausible-looking ratios attached, assembled from training data rather than
+from current filings. Valuations move — a name that traded at 0.7× tangible
+book six months ago may trade at 2× today — and a list built from memory is
+confidently wrong in exactly the way that costs money.
 
-> **Not investment advice.** This is a screening tool. It reports figures from
-> public filings and market data; it does not know your circumstances, and a
-> screen is not diligence.
-
----
+> **This is not investment advice, and no advisory relationship is created by
+> using it.** The software is provided as is, without warranty, and the author
+> accepts no liability for any loss arising from its use. Data comes from
+> third-party sources and may be inaccurate, delayed or incomplete. Past
+> performance does not indicate future results. You are solely responsible for
+> your own investment decisions; consult a licensed professional.
+> **[Read the full disclaimer →](DISCLAIMER.md)**
 
 ## Contents
 
-- [Install](#install)
+- [Why "cigar-butt"](#why-cigar-butt)
+- [The method, honestly](#the-method-honestly)
+- [Getting started](#getting-started)
 - [Credentials](#credentials)
-- [Tools](#tools)
-- [The method](#the-method)
+- [What you can do with it](#what-you-can-do-with-it)
 - [How it gets its data](#how-it-gets-its-data)
+- [Price providers and free-tier caps](#price-providers-and-free-tier-caps)
 - [Caching](#caching)
+- [Scheduled monitoring](#scheduled-monitoring)
+- [What it will not do](#what-it-will-not-do)
 - [Configuration reference](#configuration-reference)
 - [Development](#development)
-- [License](#license)
+- [Disclaimer and licence](#disclaimer-and-licence)
 
----
+## Why "cigar-butt"
 
-## Install
+The name is Warren Buffett's, for the style of investing he learned from
+Benjamin Graham. From the 1989 Berkshire Hathaway
+[shareholder letter](https://www.berkshirehathaway.com/letters/1989.html):
+
+> If you buy a stock at a sufficiently low price, there will usually be some
+> hiccup in the fortunes of the business that gives you a chance to unload at a
+> decent profit, even though the long-term performance of the business may be
+> terrible. I call this the "cigar butt" approach to investing. A cigar butt
+> found on the street that has only one puff left in it may not offer much of a
+> smoke, but the "bargain purchase" will make that puff all profit.
+
+That is the strategy this server implements: buy the discarded business nobody
+wants, below what its assets alone are worth, for the one puff left in it.
+
+Buffett wrote that passage to explain why he had moved away from it. In the
+same letter, under the heading _Mistakes of the First Twenty-Five Years_, he
+calls the approach foolish "unless you are a liquidator", notes that "the
+original 'bargain' price probably will not turn out to be such a steal after
+all", and concludes:
+
+> Time is the friend of the wonderful business, the enemy of the mediocre.
+
+Both halves are true and the second one is the important one here. The
+objections are real: at Berkshire's size the strategy stopped scaling, cheap
+businesses are usually cheap for a reason, and a mediocre business gets worse
+while you wait. Schloss ran it successfully for decades on a small book and
+extreme diversification — his record is commonly cited as roughly 15% a year
+over 45 years against about 10% for the index — which is the honest evidence
+for the method, and it is evidence about one manager, not a promise about
+yours.
+
+A tool whose entire discipline is refusing to overstate a number should not
+open by overstating its strategy.
+
+## The method, honestly
+
+The whole thesis is that **the reported balance sheet is true**. Everything
+follows from that, including the order the tools run in.
+
+Schloss's rules, as filters:
+
+| Criterion           | Filter                        | Note                                                                                              |
+| ------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------- |
+| Below tangible book | P/TBV < 1.0                   | Schloss wanted 0.6–0.8. Goodwill and intangibles are stripped out; most screeners offer plain P/B |
+| No real debt        | Debt/Equity < 0.2             | Or long-term debt near zero                                                                       |
+| Solvency            | Current ratio > 2             | Graham's own threshold                                                                            |
+| Diversify           | 15–20 positions, equal weight | Schloss ran 60 to 100. The method distrusts per-name conviction by design                         |
+
+Graham's stricter net-net variant:
+
+- **NCAV** = current assets − total liabilities − preferred stock. Buy below
+  two-thirds of NCAV.
+- **NNWC** = cash + 75% of receivables + 50% of inventory − total liabilities.
+
+Six things this does that a stock screener will not.
+
+**1. Disqualifiers run before valuation, not after.** If anything undermines
+the filings, the name is dead regardless of how cheap it looks, and no ratio
+catches that. `check_disqualifiers` reads the `submissions` filing index in one
+request and reports 8-K item 4.02 (non-reliance on previously issued
+financials), 4.01 (auditor change), 1.03 (bankruptcy), 3.01 (listing
+deficiency), 2.06 (material impairment), Form 25 and 25-NSE (delisting),
+NT 10-K/NT 10-Q (late filing), and gaps where a periodic report should be. A
+full balance sheet is twelve requests; the scan is one, so it goes first.
+
+**2. "Could not compute" is not "failed".** A check reads `n/a` when a line
+item is missing, and that is deliberately distinct from `false`. A filer that
+never tagged `Liabilities` gets no NCAV — a gap in the evidence, not a failed
+test. Collapsing the two is how a screen ends up confidently wrong.
+
+**3. Every line item comes from the same reporting period.** Filers change
+which concepts they tag, so taking "the latest fact for each concept
+independently" can silently build NNWC from a years-old receivable. Items that
+do not reach the balance sheet's own period end are reported as stale and
+excluded from the arithmetic.
+
+**4. Enterprise value and net cash are meaningless for financials.** For
+SIC 6000–6799 the deposits and the securities book are not spare cash, so the
+net-cash check returns `n/a` and says why, and debt/equity is reported without
+being allowed to veto — leverage is the business model. Use `bank_call_report`
+on those names instead: tangible common equity, noncurrent loans and the
+allowance held against them are the tests that do work on a bank.
+
+**5. The debt rule and the book rule fight each other.** Most persistent
+sub-tangible-book names are banks and insurers, whose balance sheets are debt
+by construction. Apply "no real debt" literally and the universe collapses to
+industrials, metals, shippers and foreign micro caps. Schloss owned financials
+anyway. The server surfaces the conflict rather than resolving it silently.
+
+**6. Net-nets are rare.** A screen of the whole US market routinely returns a
+handful. If you want twenty strict names, the universe may not contain twenty —
+and loosening the filters until it does means you are no longer running this
+strategy. An empty US screen is a real finding; say so, or look at Japan, where
+they have been considerably less scarce.
+
+## Getting started
 
 Requires **Node 24.21.0 or later** (see `.nvmrc`). The cache uses `node:sqlite`,
-which is a release candidate in Node 24 and needs no flag.
+which needs no flag on Node 24.
 
 ### Claude Code
 
@@ -47,9 +150,7 @@ which is a release candidate in Node 24 and needs no flag.
 claude mcp add cigar-butt -- npx -y cigar-butt
 ```
 
-### Claude Desktop, Cursor, and other clients
-
-Add to your MCP config:
+### Claude Desktop, Cursor and other MCP clients
 
 ```json
 {
@@ -58,16 +159,20 @@ Add to your MCP config:
       "command": "npx",
       "args": ["-y", "cigar-butt"],
       "env": {
-        "SEC_USER_AGENT": "Your Name your-email@example.com",
-        "TIINGO_API_KEY": "..."
+        "SEC_USER_AGENT": "Your Name your-email@example.com"
       }
     }
   }
 }
 ```
 
-The `env` block is optional — the server can prompt for credentials on first
-use and store them itself. See below.
+The `env` block is optional. With no credentials at all, a large part of the
+server still works, and the tools that need one say exactly which one and how
+to get it.
+
+Once connected, ask the model to run `setup_status`, or open the
+**Set up cigar-butt** prompt the server registers, which lists every credential
+and how to obtain it.
 
 ### From source
 
@@ -79,265 +184,179 @@ pnpm build
 node dist/index.js
 ```
 
----
-
 ## Credentials
 
-**Credentials are optional and checked per tool.** Nothing is globally
-blocked — a tool asks only for what it actually uses, so the rest of the server
-keeps working while you fill things in.
+**Credentials are optional and checked per tool.** Nothing is globally blocked:
+a tool asks only for what it actually uses, so the rest of the server keeps
+working while you fill things in.
 
-- **No credential, ever:** congressional disclosures, FINRA short interest,
-  FDIC call reports, and the allocation and rebalance maths.
-- **`SEC_USER_AGENT`:** `analyze_ticker`, `check_disqualifiers`,
-  `screen_market`. This is the core of the server and needs no registration —
-  just a real name and email — so it is the one thing worth setting first.
-- **A price key:** `get_quotes`, and the P/TBV and price-to-NCAV verdicts.
-  Without one, `analyze_ticker` still reports the whole balance sheet and says
-  the price is unavailable rather than refusing.
+| Tier                       | What you get                                                                                                                                                                       |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **No credential at all**   | Congressional disclosures, FINRA short interest, FDIC call reports, UK Companies House status, ECB exchange rates, and all the allocation and rebalance arithmetic                 |
+| **`SEC_USER_AGENT`**       | `check_disqualifiers`, `analyze_ticker`, `screen_market` — the core. There is no API key: EDGAR wants a real name and email in the User-Agent, and returns 403 without one         |
+| **Any one price provider** | `get_quotes`, and the P/TBV and price-to-NCAV verdicts. Without one, `analyze_ticker` still reports the whole balance sheet and says the price is unavailable rather than refusing |
+| **Optional extras**        | FRED for the macro context, E\*TRADE for reading your real book, Companies House and EDINET for the UK and Japan                                                                   |
+
+Every tier listed is free.
+
+To set them up, call `setup_credentials`. On a client that supports
+elicitation the server prompts for each value directly; otherwise it returns
+the registration links for the model to relay, and you pass the values back.
+They are written to a `0600` JSON file under your config directory, never into
+a project. Environment variables win over the stored file, so you can override
+one value for a single run.
 
 > **[Full credentials reference →](docs/credentials.md)** — every integration,
-> sign-up links, step-by-step instructions, the `credentials.json` shape and
-> every environment variable. Generated from the provider registry, so it cannot
-> drift from what the server reads.
+> sign-up links, step-by-step instructions (including how to obtain E\*TRADE
+> sandbox and production keys), the `credentials.json` shape and every
+> environment variable. Generated from the provider registry, so it cannot
+> drift from what the server actually reads.
 
-**To set them up, just ask.** Call `setup_credentials` with no arguments and the
-server prompts for each value (on clients that support elicitation) or returns
-the registration links for the model to relay. Values are written to a `0600`
-JSON file under your config directory — never into a project.
+Two things worth knowing before you get there:
 
-| Credential                        | Needed       | What it gives                                                  | Register                                                                                            |
-| --------------------------------- | ------------ | -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `SEC_USER_AGENT`                  | **Required** | Balance-sheet line items and the filing index                  | No key. A real name and email: [SEC webmaster FAQ](https://www.sec.gov/os/webmaster-faq#developers) |
-| `TIINGO_API_KEY`                  | One of three | Split- and dividend-adjusted daily closes. Best free option    | [tiingo.com](https://www.tiingo.com/account/api/token)                                              |
-| `POLYGON_API_KEY`                 | One of three | Whole-market bars, delisting reference data, corporate actions | [polygon.io](https://polygon.io/dashboard/api-keys)                                                 |
-| `ALPHAVANTAGE_API_KEY`            | One of three | Fundamentals cross-check, last-resort quote                    | [alphavantage.co](https://www.alphavantage.co/support/#api-key)                                     |
-| `FRED_API_KEY`                    | Optional     | Moody's Aaa (Graham's earnings-yield hurdle), CPI, the 10-year | [fredaccount.stlouisfed.org](https://fredaccount.stlouisfed.org/apikeys)                            |
-| `ETRADE_CONSUMER_KEY` / `_SECRET` | Optional     | Read your real holdings and cash                               | [developer.etrade.com](https://developer.etrade.com/getting-started)                                |
+- **SEC EDGAR has no API key.** A fake User-Agent is worse than none: EDGAR may
+  block your IP.
+- **E\*TRADE issues two independent key pairs**, sandbox and production, and
+  they are not interchangeable. Both pairs and both access tokens are stored
+  separately, so switching with `etrade_environment` can never sign a
+  production request with sandbox material. Sandbox returns canned data that
+  does not match what you asked for — request GOOG, get AAPL — so use it to
+  prove the connection works, never to read real numbers.
 
-Every tier listed is free. **FINRA short interest and FDIC BankFind need no
-credential at all** and always work.
+## What you can do with it
 
-### Getting an E*TRADE API key
+Thirty-eight tools, grouped by what you are trying to do. The order below is
+roughly the order they are meant to run in; the server ships the same order of
+operations to the model as its instructions.
 
-E*TRADE issues two independent key pairs and they are **not interchangeable** — a
-sandbox token is rejected by production even if sent to the right host.
+### Set the server up
 
-**Sandbox** (instant, self-service): log in at `us.etrade.com`, then open
-[us.etrade.com/etx/ris/apikey](https://us.etrade.com/etx/ris/apikey). The key and
-secret appear on the page immediately. Sandbox returns canned data that does not
-match what you ask for — request GOOG, get AAPL — so use it to prove the
-connection works, never to read real numbers.
+| Tool                | What it does                                                                                |
+| ------------------- | ------------------------------------------------------------------------------------------- |
+| `setup_status`      | Which credentials are configured, where each value came from, sign-up URLs for what is not  |
+| `setup_credentials` | Prompt for and store credentials in the `0600` file                                         |
+| `provider_status`   | Every price provider: key, rate, budget consumed, and whether it is sitting out a cap       |
+| `cache_status`      | What the local response cache holds, by source, and where the database lives                |
+| `cache_clear`       | Drop cached responses so the next call refetches. `expiredOnly` never discards a live entry |
 
-**Production** — three forms on `us.etrade.com`, in order:
+### Screen the market
 
-1. [API User Intent Survey](https://us.etrade.com/etx/ris/apisurvey/#/questionnaire)
-2. [API Developer Agreement](https://us.etrade.com/etx/ris/apisurvey/#/agreement)
-3. [Annual market-data Attestation](https://us.etrade.com/etx/ris/apisurvey/#/attestation) — this one recurs yearly
+| Tool            | What it does                                                                                                                                                       |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `screen_market` | Every SEC filer that reported in a quarter, via the XBRL `frames` endpoint — five requests regardless of universe size. Ranked by NCAV as a share of tangible book |
 
-An **individual** key is displayed on screen the moment those are done: no email,
-no PDF, no phone call, no review. A **vendor** key (multi-user or redistributed)
-is issued Inactive, and E*TRADE emails you to schedule a demo with Product and
-Legal first. You need an E*TRADE account, but it does **not** have to be funded —
-funding is only required to trade. An individual key is locked to the user ID
-that created it.
+`screen_market` attaches **no prices**, on purpose: pairing a stale quote with
+a filing figure is the mistake this server exists to prevent. Its output is a
+candidate list for `analyze_ticker`, not a verdict.
 
-Store both pairs at once as `ETRADE_SANDBOX_CONSUMER_KEY` /
-`ETRADE_PROD_CONSUMER_KEY` (with matching `_SECRET`), and switch with the
-`etrade_environment` tool. Access tokens are stored per environment too, so
-connecting one does not disconnect the other and a sandbox token can never be
-sent to production.
+### Check the name is not already dead
 
-Prefer the server's own 0600 credential file over exporting these in a shell rc:
-an export is inherited by every process you launch, and an exported `ETRADE_ENV`
-overrides the stored setting, which makes the toggle look broken.
-`setup_status` reports which source each value came from.
+| Tool                  | What it does                                                                                                                                           |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `check_disqualifiers` | One request against the SEC filing index: restatements, auditor changes, bankruptcy, delisting, late filings                                           |
+| `uk_company_status`   | The UK analogue, from the Companies House register: liquidation, administration, strike-off, overdue accounts, insolvency history, charges over assets |
 
-Then run `etrade_connect`. It returns a URL, E*TRADE shows a short verifier code,
-and you paste it back. No browser redirect is involved, so nothing needs to
-listen on a port. The request token expires **5 minutes** after issue. Access
-tokens idle out after 2 hours — the server renews automatically inside that
-window — and die at midnight US Eastern, which nothing can renew past.
+Run these before any valuation work.
 
-**SEC EDGAR has no API key.** It identifies callers by a descriptive
-`User-Agent` containing a real name and email address. Sending one is
-mandatory — without it EDGAR returns 403 and may block your IP.
+### Verify one name
 
-Resolution order is environment variables first, then the stored file, so you
-can override one key for a single run without editing anything. To point the
-server at an existing dotenv file instead, set `CIGAR_BUTT_ENV_FILE`. See
-[`.env.template`](.env.template) for a complete annotated file.
+| Tool                      | What it does                                                                                                                                                                                                       |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `analyze_ticker`          | The full workup: disqualifier scan, then tangible book, NCAV, NNWC and net cash from XBRL line items, then a dated price, then the Schloss and Graham verdicts. Stops before valuation if the name is disqualified |
+| `get_quotes`              | Current prices for a list of tickers, each with its as-of date and the provider it came from                                                                                                                       |
+| `check_corporate_actions` | Listing status, splits and dividends. A split between the balance-sheet date and today makes every per-share figure wrong by the split factor                                                                      |
+| `short_interest`          | FINRA consolidated short interest — the market's own answer to "why is this cheap?". Context, not a veto                                                                                                           |
+| `bank_call_report`        | FDIC call reports: tangible common equity, noncurrent loans, allowance coverage. The asset tests that work on a financial                                                                                          |
 
----
+### Look outside the US
 
-## Tools
+| Tool                | What it does                                                                                                                                                                                  |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `edinet_search`     | Japanese filings by company name, TSE ticker or EDINET code, from the FSA's EDINET. Indexed by date, not by company, so it walks back a day per request — annual reports cluster in late June |
+| `edinet_financials` | Balance-sheet line items and the Graham tests for a Japanese filer, from its EDINET XBRL, converted at a dated ECB rate                                                                       |
+| `uk_company_search` | Find a UK company on the Companies House register and get its company number                                                                                                                  |
+| `fx_rate`           | Exchange rates from the ECB, current or historical. A balance sheet in yen cannot be compared against a dollar cash balance without one                                                       |
 
-### Setup
+`uk_company_status` returns no financials: UK accounts are filed as iXBRL or
+PDF documents rather than structured data, so the UK path is a disqualifier
+check, not a valuation.
 
-| Tool                | What it does                                                                                 |
-| ------------------- | -------------------------------------------------------------------------------------------- |
-| `setup_status`      | Which credentials are configured, where each came from, and sign-up URLs for what is missing |
-| `setup_credentials` | Prompt for and store credentials                                                             |
+### Size a book and rebalance it
 
-### Research
+| Tool               | What it does                                                                                                                                                                                             |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `build_allocation` | Verified candidates plus a cash balance into whole-share targets. Equal weight, per-name cap, always rounds down so the plan cannot exceed the balance                                                   |
+| `plan_rebalance`   | Current holdings against target weights into buys, sells and full exits. Compares market value rather than share count, reports sells before the buys they fund, and says when the buys are not fundable |
 
-| Tool                      | What it does                                                                                                                         |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `screen_market`           | Screens every SEC filer that reported in a quarter, via the XBRL `frames` endpoint. Five requests total regardless of universe size  |
-| `check_disqualifiers`     | Scans one company's filing index for restatements, auditor changes, bankruptcy, delisting and late filings. One request              |
-| `analyze_ticker`          | Full workup: disqualifiers, then the asset tests from filing line items, then a dated price, then the Schloss and Graham verdicts    |
-| `get_quotes`              | Current prices for a list of tickers, each with its as-of date and provider                                                          |
-| `short_interest`          | FINRA consolidated short interest — the market's own answer to "why is this cheap?". No credential needed                            |
-| `check_corporate_actions` | Listing status, splits and dividends. Run this before pairing a filing's share count with a price                                    |
-| `bank_call_report`        | FDIC call reports: tangible common equity, noncurrent loans, allowance coverage. The tests that work on a bank. No credential needed |
-| `macro_context`           | Moody's Aaa, the 10-year, CPI, and the implied Graham P/E ceiling. Needs a FRED key                                                  |
+Only pass names you have actually verified. A weighting implies a level of
+diligence a screen does not provide.
 
-### Brokerage
+### Read your actual portfolio
 
-Read-only. This server never places an order.
+Read-only. This server never places, modifies or cancels an order.
 
-| Tool                  | What it does                                                                                                                                     |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `etrade_connect`      | OAuth handshake with E*TRADE. Returns a URL to open; you paste back the verifier code                                                            |
-| `etrade_accounts`     | List accounts and their account ID keys                                                                                                          |
-| `etrade_positions`    | Holdings and cash for one account, emitted in exactly the shape `plan_rebalance` takes                                                           |
-| `etrade_environment`  | Show or switch between sandbox and production. Both key pairs and both access tokens are stored separately, so switching never mixes credentials |
-| `etrade_balances`     | Cash available, settled vs unsettled, buying power, margin balance, open margin calls                                                            |
-| `etrade_transactions` | Trade, dividend, transfer and fee history as a table                                                                                             |
-| `etrade_disconnect`   | Revoke and delete the stored access token                                                                                                        |
+| Tool                  | What it does                                                                                                                            |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `etrade_connect`      | OAuth 1.0a handshake. Returns a URL; E\*TRADE shows a short code out of band, which you pass back as `verifier`                         |
+| `etrade_accounts`     | Accounts and the `accountIdKey` every other E\*TRADE tool needs — not the account number the API rejects                                |
+| `etrade_positions`    | Holdings and investable cash, each marked at its last trade with that trade's date, emitted in exactly the shape `plan_rebalance` takes |
+| `etrade_balances`     | Cash available to invest, settled versus unsettled, buying power, margin balance, open margin calls                                     |
+| `etrade_transactions` | Trades, dividends, transfers and fees as a table. E\*TRADE keeps two years                                                              |
+| `etrade_environment`  | Show or switch between sandbox and production without mixing credentials                                                                |
+| `etrade_disconnect`   | Revoke and delete the stored access token, leaving the consumer key in place                                                            |
 
-### Congressional disclosures
+**Tokens die at midnight US Eastern.** They also go idle after two hours, which
+the server renews automatically; midnight it cannot. There is no refresh token,
+so re-authorising needs a human to read a verifier code back.
 
-Outside the Graham/Schloss method, and the output says so: disclosures are
-banded amounts reported weeks late, so they can never be a figure the screen
-acts on. What they are good for is context — and the committee cross-reference
-is the part carrying real information. No credential needed.
+### Monitor positions between sessions
 
-| Tool                      | What it does                                                                                                                  |
-| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `congress_trades`         | Search disclosed Senate transactions **by ticker** or member, with each member's committee seats                              |
-| `congress_index`          | Show how much disclosure history is indexed locally, and backfill further                                                     |
-| `congress_member_profile` | A senator's committees, board seats and outside positions, plus every employer paying the household — self, spouse or child   |
-| `congress_house_filings`  | House transaction-report filings with PDF links. Filing records only: House disclosures are PDFs, many of them scanned images |
+| Tool                 | What it does                                                                                                         |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `watch_status`       | Recent runs, snapshot age, rules armed, file locations. Check this before trusting that anything is being watched    |
+| `watch_alerts`       | Alerts fired, each with the reference price and its date, the observed price and its date, and the rule that tripped |
+| `watch_rules`        | The armed rules and their thresholds                                                                                 |
+| `watch_rule_set`     | Create or update a price-move alarm. Local state only; never touches the broker                                      |
+| `watch_rule_remove`  | Delete a rule and its recorded reference prices                                                                      |
+| `watch_snapshot_set` | Record the holdings to monitor, in the shape `etrade_positions` emits                                                |
 
-**Why there is a local index.** eFD cannot be searched by ticker — its form
-takes a filer name, a state, a report type and a filing-date window, and
-nothing else. So transactions are parsed into a local SQLite index and queried
-there. It refreshes its recent window automatically when a day stale, and
-reports are immutable once filed, so staying current costs only the new
-filings. Depth is up to you: a 12-month window is ~180 reports, five years
-~690, the whole archive back to 2012 ~2,400, fetched at roughly one per second.
-`congress_index` reports coverage and resumes where it stopped.
+See [Scheduled monitoring](#scheduled-monitoring) for how this runs when no
+session is open, and what it genuinely cannot do.
 
-**On sources.** There is no bulk download of Senate disclosures and no export
-endpoint — the Senate Ethics Committee names
-[efdsearch.senate.gov](https://efdsearch.senate.gov/search/) as _the_ public
-database, and `/search/report/export/`, `/search/download/` and
-`/search/report/csv/` all 404. Its search endpoint is therefore the structured
-feed, and it reaches the full archive: 2,426 periodic transaction reports back
-to 2012. Every third-party mirror re-scrapes that same endpoint and puts an API
-key in front of it; the ones tested either require a key (Financial Modeling
-Prep, Finnhub, DisclosedCapitol), bot-block (CapitolTrades), or have gone stale
-(senate-stock-watcher's aggregate stops in 2019). So this reads the primary
-source, parsed structurally with `node-html-parser` — each part of a report
-lives in its own `section.card`, so an empty part reads as empty instead of
-adopting the next one's table.
+### Understand the context
 
-### Portfolio
+| Tool                      | What it does                                                                                                                                                                                     |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `macro_context`           | Moody's Aaa yield, the 10-year, CPI, and the P/E ceiling they imply. Graham wanted an earnings yield of at least twice the Aaa yield, so the hurdle moves with the bond market. Needs a FRED key |
+| `price_history_stats`     | Liquidity, days to sell a position of a given size, distance below the 52-week high, normal daily move                                                                                           |
+| `congress_trades`         | Disclosed Senate transactions searchable **by ticker** or member, with each member's committee seats                                                                                             |
+| `congress_index`          | How much Senate disclosure history is indexed locally, and backfill further                                                                                                                      |
+| `congress_member_profile` | A senator's committees, board seats and outside positions, plus every employer paying the household                                                                                              |
+| `congress_house_filings`  | House transaction-report filings with PDF links — the filing record, not the transactions inside it                                                                                              |
 
-| Tool               | What it does                                                                      |
-| ------------------ | --------------------------------------------------------------------------------- |
-| `build_allocation` | Turns verified candidates and a cash balance into whole-share position targets    |
-| `plan_rebalance`   | Compares current holdings against targets and produces buys, sells and full exits |
+Two warnings the tools repeat in their own output.
 
-### Cache
+**`price_history_stats` is not part of the screen.** This is an asset test; no
+statistic in that tool bears on whether a balance sheet is cheap, and none of
+it may be used to time a purchase. Its one legitimate veto is liquidity — deep
+value lives in micro caps where the discount is often just the illiquidity, and
+a name you cannot exit is a name you cannot own. RSI, MACD and every other
+timing construct are deliberately absent.
 
-| Tool           | What it does                                     |
-| -------------- | ------------------------------------------------ |
-| `cache_status` | What the local response cache holds, by source   |
-| `cache_clear`  | Drop cached responses so the next call refetches |
-
----
-
-## The method
-
-Schloss's rules, as filters:
-
-| Criterion           | Filter                        | Note                                                                                                                    |
-| ------------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| Below tangible book | P/TBV < 1.0                   | Schloss wanted 0.6–0.8. Goodwill and intangibles are stripped from book value here; most screeners only offer plain P/B |
-| No real debt        | Debt/Equity < 0.2             | Or long-term debt near zero                                                                                             |
-| Solvency            | Current ratio > 2             | Graham's own threshold                                                                                                  |
-| Diversify           | 15–20 positions, equal weight | Schloss ran 60 to 100                                                                                                   |
-
-Graham's stricter net-net variant:
-
-- **NCAV** = current assets − total liabilities − preferred stock. Buy below
-  two-thirds of NCAV.
-- **NNWC** = cash + 75% of receivables + 50% of inventory − total liabilities.
-
-Six things the server does that a screener will not:
-
-**1. Disqualifiers run before valuation, not after.** The whole thesis is that
-the reported balance sheet is true, so anything undermining the filings kills
-the name outright regardless of how cheap it looks. `check_disqualifiers` reads
-the `submissions` filing index — one request — and reports 8-K item 4.02
-(non-reliance on prior financials), 4.01 (auditor change), 1.03 (bankruptcy),
-3.01 (listing deficiency), 2.06 (impairment), Form 25 and 25-NSE (delisting),
-`NT 10-Q`/`NT 10-K` (late filing), and gaps where a periodic report should be.
-
-A small-cap in the source research screened well on net cash and no debt while
-having retracted a quarterly earnings release, drawn a law-firm investigation,
-and received an NYSE delinquency notice inside a two-month window. No valuation
-ratio catches that. An 8-K item scan catches it in one fetch.
-
-**2. "Could not compute" is not "failed".** A check reads `n/a` when a line item
-is missing, which is deliberately distinct from `false`. Collapsing the two is
-how a screen ends up confidently wrong.
-
-**3. Every line item comes from the same reporting period.** Filers change which
-concepts they tag. Astec stopped tagging `AccountsReceivableNetCurrent` in 2019
-while still filing quarterly, so taking "the latest fact for each concept
-independently" silently builds NNWC from a seven-year-old receivable. Items that
-do not reach the sheet's own period end are reported as stale and excluded from
-the arithmetic.
-
-**4. Enterprise value is not a net-cash proxy for financials.** For a bank it is
-meaningless: Citigroup has shown an enterprise value of −$18.46 billion and a
-"net cash position" of $231 billion, which is deposits and the securities book,
-not spare cash. For SIC 6000–6799 the server marks the net-cash check `n/a` and
-says why.
-
-**5. The debt rule and the book rule fight each other.** Most persistent
-sub-tangible-book names are banks and insurers, whose balance sheets are debt by
-construction. Apply "no real debt" literally and the universe collapses to
-industrials, metals, shippers and foreign micro caps. Schloss owned financials
-anyway. The server surfaces the conflict rather than resolving it silently.
-
-**6. Net-nets are rare.** A recent screen of 9,000 companies surfaced 14. If you
-want 20 strict names, the universe may not contain 20 — and loosening the
-filters until it does means you are no longer running this strategy.
-
-### What it will not do
-
-It will not backtest. Backtests assembled from a list picked with present-day
-knowledge are survivorship-biased by construction: you chose those names partly
-because they still exist, so any return figure flatters the strategy. Free price
-sources are neither survivorship-bias-free nor point-in-time correct, which is
-exactly what a research database like CRSP buys you. For a real backtest, use
-point-in-time data with delistings included.
-
-Schloss's own record — roughly 15.3% annually over 45 years against about 10%
-for the index — is the honest evidence for the method.
-
----
+**Congressional disclosures sit outside the method.** Amounts are bands
+reported weeks late, so nothing there can be a figure the screen acts on. The
+committee cross-reference is the part carrying real information. eFD cannot be
+searched by ticker — its form takes a filer name, a state and a filing-date
+window and nothing else — so transactions are parsed into a local SQLite index
+and queried there; `congress_index` reports how deep that index reaches, and a
+search finds only what has been indexed.
 
 ## How it gets its data
 
-**SEC EDGAR is authoritative and everything else is a cross-check.** EDGAR is the
-filing itself: exact line items, each carrying its accession number, form type,
-period end and filing date. A vendor's normalisation of a filing loses to the
-filing every time, and their derived "net cash" figures have been wrong in
+**SEC EDGAR is authoritative and everything else is a cross-check.** EDGAR is
+the filing itself: exact line items, each carrying its accession number, form
+type, period end and filing date. A vendor's normalisation of a filing loses to
+the filing, and derived "net cash" figures from screeners have been wrong in
 testing.
 
 | Endpoint                  | Used for                                                                                                                         |
@@ -346,98 +365,52 @@ testing.
 | `api/xbrl/frames`         | One concept across every filer in a period. This is the market-wide screen                                                       |
 | `submissions`             | The filing index, including the 8-K `items` array that makes the disqualifier checks a structured lookup rather than a news read |
 
-Prices come from a failover pool of eight providers; see below.
-Every failure is reported when all three fail, so "no key", "bad ticker" and
-"rate limited" stay distinguishable.
-
 **Every price carries its date.** In testing, two fetches of one ticker minutes
 apart returned $18.42 dated Sep 4 and $15.50 dated Jul 10 — a 19% spread on the
-same security. A single search for one small-cap returned prices from $29.85 to
-$47.86 across pages cached at different dates. Picking any one figure without
-its date is arbitrary.
+same security, hours apart, both presented as "the price". A number without its
+date is arbitrary, which is why `Quote.asOf` is not optional, why a computed
+metric reports the date of its _oldest_ input rather than its newest, and why a
+rebalance plan flags any order whose price is undated.
 
----
-
-## Scheduled monitoring
-
-`cigar-butt watch` polls your holdings on a timer and alerts on moves beyond a
-threshold you set. Bare `cigar-butt` is still the MCP server — only the explicit
-`watch` subcommand branches away.
-
-```bash
-cigar-butt watch rule add drawdown '*' 10   # alert on any held name moving ±10%
-cigar-butt watch install                     # write a launchd agent (hourly)
-launchctl load -w ~/Library/LaunchAgents/dev.cigar-butt.watch.plist
-cigar-butt watch status
-```
-
-From a session, `watch_snapshot_set`, `watch_rule_set`, `watch_status`,
-`watch_alerts`, `watch_rules` and `watch_rule_remove` do the same over the same
-database. **Nothing here places, modifies or cancels an order.**
-
-**The MCP server cannot schedule anything.** A stdio server is a subprocess and
-dies with its client, and the protocol has no way for a server to reach an
-absent user — on any transport. So the OS scheduler runs a short-lived
-`watch run`, and the server reads what it recorded.
-
-Three limits worth knowing before you rely on it:
-
-- **Alarm latency is the poll interval, one hour by default.** That is what free
-  price tiers buy — Alpha Vantage allows 25 requests a day, Tiingo 50 an hour —
-  and a 20-name book polled every 15 minutes would exhaust them by lunchtime.
-  This is a check, not a tripwire.
-- **Price alarms need no broker.** They run against a stored holdings snapshot
-  using only a price-provider key, so they work overnight, at weekends, and
-  indefinitely.
-- **Broker refresh does not survive midnight.** E\*TRADE tokens die at midnight
-  US Eastern with no refresh token, and re-authorising needs a human to read
-  back a verifier code. So refresh the snapshot when you are authorised; every
-  alert states the snapshot's age rather than pretending it is current.
-
-Alerts go to stderr, a log file, a macOS notification, or a Slack/Discord webhook
-(`CIGAR_BUTT_WATCH_WEBHOOK`). Test one before you need it:
-`cigar-butt watch test macos`. Four mechanisms prevent alert storms — a cooldown,
-a hysteresis latch, optional re-baselining, and one notification per cycle.
-
-See [`docs/scheduling-research.md`](docs/scheduling-research.md) for why this
-shape and not a daemon, and what is genuinely impossible.
+Sources that need no credential at all: SEC EDGAR (a contact string, not a
+key), FINRA, FDIC BankFind, Senate eFD, the House Clerk's index, the
+`unitedstates/congress-legislators` rosters, and Frankfurter for ECB reference
+rates.
 
 ## Price providers and free-tier caps
 
 Quote providers are a **failover pool**, not a fixed chain. A request tries them
 in order and skips any that has no key, is cooling down, or has spent its
-budget. That is what makes a screen of any size survivable on free tiers.
+budget. Any one of them is enough; more simply buys headroom.
 
-| Provider                | Free tier                                        | Notes                                         |
-| ----------------------- | ------------------------------------------------ | --------------------------------------------- |
-| Tiingo                  | 50/hour, 1,000/day, **500 unique symbols/month** | Split- and dividend-adjusted. Best data       |
-| Polygon.io              | 5/minute, no daily cap                           | Every paid tier is unlimited                  |
-| Finnhub                 | 60/minute, no daily cap                          | Most generous free quote tier                 |
-| Twelve Data             | 8/minute, 800/day                                | Carries an explicit trade date                |
-| Financial Modeling Prep | 250/day                                          | Extends the pool when others are spent        |
-| Alpha Vantage           | 5/minute, **25/day**                             | Effectively a spot-check                      |
-| Alpaca                  | 200/minute, no daily cap                         | Most headroom of any free tier here. IEX feed |
-| EOD Historical Data     | 20/day                                           | The only **non-US** coverage. Pass `7203.TSE` |
+| Provider                | Free tier                                 | Notes                                                                                     |
+| ----------------------- | ----------------------------------------- | ----------------------------------------------------------------------------------------- |
+| Tiingo                  | ~50 unique tickers/hour, 500 requests/day | Split- and dividend-adjusted. The preferred source                                        |
+| Polygon.io              | 5/minute, end-of-day, ~2 years of history | Also the reference data behind `check_corporate_actions`                                  |
+| Finnhub                 | 60/minute, no daily cap                   | The most generous free quote tier here                                                    |
+| Twelve Data             | 8/minute, 800/day                         | Carries an explicit trade date                                                            |
+| Alpaca                  | 200/minute on the free plan               | Most headroom of any tier here. IEX feed, so a thin micro cap may not have printed at all |
+| Financial Modeling Prep | 250/day                                   | Free tier restricted to large caps                                                        |
+| Alpha Vantage           | 5/minute, **25/day**                      | Effectively a spot-check                                                                  |
+| EOD Historical Data     | 20/day                                    | The only **non-US** coverage. Pass `7203.TSE`                                             |
 
-**Usage is counted locally and checked before a request goes out**, against each
-service's documented limits — not inferred from a 429 afterwards. On a daily cap
-that distinction matters: the rejected call still counts against you, so
-learning reactively spends a request that was never going to work. A 429 is
-still honoured as a backstop, since the same key may be in use elsewhere.
+**Usage is counted locally and checked before a request goes out**, against
+each service's documented limits, rather than inferred from a 429 afterwards.
+On a daily cap that distinction matters: a rejected call still counts against
+you, so learning reactively spends a request that was never going to work. A
+429 is still honoured as a backstop, since the same key may be in use
+elsewhere. Counters live in SQLite and survive a restart, because a daily quota
+does not reset just because the process did.
 
-Counters live in SQLite and persist across restarts, because a daily quota does
-not reset just because the process did. Windows roll over on their own — a new
-minute, hour, day or month is a new counter, and the old one stops applying.
-
-Note Tiingo meters **unique symbols per month**, not just requests. A single
-200-name screen spends 40% of a month while the request counters still look
-healthy, so that budget is tracked as distinct symbols; re-reading one already
-counted this month is free.
+Tiingo meters **unique symbols per month**, not only requests, so a single
+large screen can spend a substantial share of the month while the request
+counters still look healthy. Distinct symbols are tracked separately;
+re-reading one already counted this month is free.
 
 ### If you pay for a plan
 
-The defaults above are free-tier limits. Without overriding them, a paid plan is
-throttled to free speed:
+The defaults above are free-tier limits, so without overriding them a paid plan
+runs at free speed.
 
 | Variable                                | Effect                                                                                            |
 | --------------------------------------- | ------------------------------------------------------------------------------------------------- |
@@ -445,32 +418,15 @@ throttled to free speed:
 | `CIGAR_BUTT_RATE_<PROVIDER>`            | Requests per second, e.g. `CIGAR_BUTT_RATE_POLYGON=100`                                           |
 | `CIGAR_BUTT_PROVIDER_ORDER`             | Preference order, e.g. `polygon,tiingo`. Unlisted providers keep their default order behind these |
 
-`provider_status` shows every provider's key, rate, budget consumption and
-cooldown, and can clear recorded caps.
-
-### Sources needing no credential at all
-
-| Source                   | Used by                                                  | Notes                              |
-| ------------------------ | -------------------------------------------------------- | ---------------------------------- |
-| SEC EDGAR                | `analyze_ticker`, `check_disqualifiers`, `screen_market` | Needs a contact string, not a key  |
-| FINRA                    | `short_interest`                                         | Consolidated short interest        |
-| FDIC BankFind            | `bank_call_report`                                       | Bank call reports                  |
-| Senate eFD / House Clerk | all `congress_*` tools                                   | Official disclosures               |
-| congress-legislators     | committee cross-reference                                | Committee and subcommittee rosters |
-| Frankfurter (ECB)        | `fx_rate`                                                | Daily reference exchange rates     |
-
 ## Caching
 
-Responses are cached in SQLite (`node:sqlite` — built into Node 24, no
-dependency) under your cache directory. The free tiers this server runs on are
-tight enough to be the binding constraint: Alpha Vantage allows ~25 requests a
-day, Polygon 5 a minute, Tiingo ~50 tickers an hour. A full per-name balance
-sheet is twelve `companyconcept` calls plus a `submissions` fetch, so a 200-name
-screen is roughly 2,600 requests. MCP servers also restart whenever a client
-reconnects, so an in-memory cache throws the expensive work away at every
-session boundary.
+Responses are cached in SQLite (`node:sqlite`, built into Node 24, so it costs
+no dependency). The free tiers are the binding constraint: a full per-name
+balance sheet is twelve `companyconcept` calls plus a `submissions` fetch. MCP
+servers also restart whenever a client reconnects, so an in-memory cache would
+throw the expensive work away at every session boundary.
 
-TTLs are set by how fast the underlying fact can actually change:
+TTLs are set by how fast the underlying fact can actually change.
 
 | Source                     | TTL      | Why                                                                                |
 | -------------------------- | -------- | ---------------------------------------------------------------------------------- |
@@ -480,27 +436,110 @@ TTLs are set by how fast the underlying fact can actually change:
 | SEC frames                 | 7 days   | A quarter's data is fixed once filed                                               |
 | Ticker index               | 7 days   | A ~1MB payload that changes at the margins                                         |
 
-`cache_status` shows what is held; `cache_clear` drops it. Set
-`CIGAR_BUTT_NO_CACHE=1` to bypass it entirely.
+Quotes are cached per provider, because two providers can legitimately disagree
+and blending them under one key would hide it. `cache_status` shows what is
+held, `cache_clear` drops it, and `CIGAR_BUTT_NO_CACHE=1` bypasses it entirely.
 
----
+## Scheduled monitoring
+
+`cigar-butt watch` polls your holdings on a timer and alerts on moves beyond a
+threshold you set. Bare `cigar-butt` is still the MCP server; only the explicit
+`watch` subcommand branches away.
+
+```bash
+cigar-butt watch rule add drawdown '*' 10   # alert on any held name moving 10%
+cigar-butt watch install                    # write a launchd agent (macOS)
+launchctl load -w ~/Library/LaunchAgents/dev.cigar-butt.watch.plist
+cigar-butt watch status
+```
+
+`cigar-butt watch` with no arguments prints the full subcommand list. The
+`watch_*` tools do the same work over the same database from inside a session.
+Nothing here places, modifies or cancels an order.
+
+**The MCP server cannot schedule anything.** A stdio server is a subprocess and
+dies with its client, and the protocol gives a server no way to reach an absent
+user, on any transport. So the OS scheduler runs a short-lived `watch run`, and
+the server reads what it recorded. See
+[`docs/scheduling-research.md`](docs/scheduling-research.md) for why this shape
+and not a daemon, and what is genuinely impossible.
+
+Three limits worth knowing before relying on it:
+
+- **Alarm latency is the poll interval.** That is what free price tiers buy:
+  Alpha Vantage allows 25 requests a day, Tiingo about 50 an hour, and a
+  20-name book polled every 15 minutes would exhaust them by lunchtime. This is
+  a check, not a tripwire.
+- **Price alarms need no broker.** They run against a stored holdings snapshot
+  using only a price key, so they work overnight, at weekends, and
+  indefinitely.
+- **Broker refresh does not survive midnight.** E\*TRADE tokens expire at
+  midnight US Eastern with no refresh token. Refresh the snapshot while you are
+  authorised; every alert states the snapshot's age rather than pretending it
+  is current.
+
+Alerts go to stderr, a log file, a macOS notification, or a Slack/Discord
+webhook (`CIGAR_BUTT_WATCH_WEBHOOK`). Test one before you need it:
+`cigar-butt watch test macos`. A cooldown, a hysteresis latch, optional
+re-baselining and one notification per cycle keep alerts from storming.
+
+## What it will not do
+
+**It will not place a trade.** Every brokerage tool is read-only, and that is a
+design decision rather than an unfinished feature.
+
+**It will not backtest.** A backtest assembled from a list picked with
+present-day knowledge is survivorship-biased by construction: you chose those
+names partly because they still exist, so any return figure flatters the
+strategy. Free price sources are neither survivorship-bias-free nor
+point-in-time correct, which is exactly what a research database like CRSP buys
+you. For a real backtest, use point-in-time data with delistings included.
+
+**It will not estimate what a trade costs.** For a micro-cap book the published
+fee is a rounding error and the bid-ask spread is the trade cost, and the ratio
+between them is roughly two orders of magnitude: about $0.41 of statutory
+charges on a $10,000 sale, against a plausible several hundred dollars of
+round-trip spread. Spread and market impact are not observable from anything
+here, so they are not estimated — printing a precise figure for the $0.41 while
+saying nothing about the rest would be read as _the_ cost. Fee figures in the
+output are statutory charges only. See
+[`docs/trading-costs-research.md`](docs/trading-costs-research.md).
+
+**It will not compute a tax liability.** It reports the account classification
+and cost basis a broker records, and will do arithmetic on two figures it was
+given, but holding period, wash sales and basis adjustments are not modelled,
+and a number that looked like a tax bill would be believed as one. An account
+whose tax treatment reads `unknown` is undetermined and is never assumed
+taxable. See
+[`docs/tax-treatment-research.md`](docs/tax-treatment-research.md).
+
+**It will not name a stock it has not fetched this session.** A name reaches
+the output only with a dated figure behind it.
 
 ## Configuration reference
 
-| Variable              | Default                                        | Purpose                                |
-| --------------------- | ---------------------------------------------- | -------------------------------------- |
-| `CIGAR_BUTT_ENV_FILE` | unset                                          | Load credentials from this dotenv file |
-| `CIGAR_BUTT_CONFIG`   | `$XDG_CONFIG_HOME/cigar-butt/credentials.json` | Where credentials are stored           |
-| `CIGAR_BUTT_CACHE`    | `$XDG_CACHE_HOME/cigar-butt/cache.sqlite`      | Cache database location                |
-| `CIGAR_BUTT_NO_CACHE` | unset                                          | Set to `1` to bypass the cache         |
+| Variable                   | Default                                        | Purpose                                |
+| -------------------------- | ---------------------------------------------- | -------------------------------------- |
+| `CIGAR_BUTT_ENV_FILE`      | unset                                          | Load credentials from this dotenv file |
+| `CIGAR_BUTT_CONFIG`        | `$XDG_CONFIG_HOME/cigar-butt/credentials.json` | Where credentials are stored           |
+| `CIGAR_BUTT_CACHE`         | `$XDG_CACHE_HOME/cigar-butt/cache.sqlite`      | Cache database location                |
+| `CIGAR_BUTT_NO_CACHE`      | unset                                          | Set to `1` to bypass the cache         |
+| `CIGAR_BUTT_CONGRESS_DB`   | under the cache directory                      | Senate disclosure index location       |
+| `CIGAR_BUTT_WATCH_DB`      | under the cache directory                      | Watch state: snapshot, rules, alerts   |
+| `CIGAR_BUTT_WATCH_LOG`     | unset                                          | Write watch alerts to this file        |
+| `CIGAR_BUTT_WATCH_WEBHOOK` | unset                                          | Slack or Discord webhook for alerts    |
+| `CIGAR_BUTT_SETTINGS_DB`   | under the cache directory                      | Remembered tool preferences            |
 
----
+Provider budgets and rates are in
+[Price providers](#price-providers-and-free-tier-caps); every credential
+variable is in [`docs/credentials.md`](docs/credentials.md), and
+[`.env.template`](.env.template) is a complete annotated file.
 
 ## Development
 
 ```bash
 pnpm install
-pnpm check        # lint, format, typecheck, knip, test
+pnpm check        # lint, format:check, typecheck, knip, test
 pnpm test         # vitest
 pnpm build        # tsdown → dist/index.js
 pnpm dev          # tsx watch
@@ -517,23 +556,29 @@ pnpm dev          # tsx watch
 
 Two rules that are not obvious from the code:
 
-**All arithmetic goes through decimal.js.** `number` appears at the I/O boundary
-— JSON in from an API, JSON out to the MCP client — and nowhere in between.
-Partly for pennies, mostly because these figures are compared against hard
-thresholds: binary floating point puts a name on the wrong side of "P/TBV below
-1.0" often enough to matter when the whole method is _buy below the line_. Note
-that `Decimal.isPositive()` is **not** `> 0` — decimal.js reads zero's sign as
-positive — so use the `gtZero` helper.
+**All arithmetic goes through decimal.js.** `number` appears at the I/O
+boundary — JSON in from an API, JSON out to the MCP client — and nowhere in
+between. Partly for pennies, mostly because these figures are compared against
+hard thresholds: binary floating point puts a name on the wrong side of "P/TBV
+below 1.0" often enough to matter when the whole method is _buy below the
+line_.
 
 **Nothing may write to stdout.** That stream is the MCP protocol. A stray
 `console.log` corrupts it and the client drops the connection, which is why
-`eslint/no-console` is an error.
+`no-console` is an error across `src/` and why the watch CLI prints to stderr.
 
-See [`CLAUDE.md`](CLAUDE.md) for the full architecture and
-[`STYLEGUIDE.md`](STYLEGUIDE.md) for the TypeScript conventions.
+[`CLAUDE.md`](CLAUDE.md) has the full architecture and the hard rules;
+[`STYLEGUIDE.md`](STYLEGUIDE.md) has the TypeScript conventions.
+`docs/credentials.md` is generated from `src/config/providers.ts` by
+`pnpm docs:credentials` — do not edit it by hand.
 
----
+## Disclaimer and licence
 
-## License
+This software is not investment, financial, tax or legal advice, creates no
+advisory or fiduciary relationship, comes with no warranty of any kind, and its
+author accepts no liability for any loss arising from its use. Read
+[DISCLAIMER.md](DISCLAIMER.md) in full before using it for anything involving
+real money.
 
-Apache-2.0. See [LICENSE](LICENSE).
+Licensed under Apache-2.0. See [LICENSE](LICENSE), whose sections 7 and 8 carry
+the warranty disclaimer and limitation of liability that govern.

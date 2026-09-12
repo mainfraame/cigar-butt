@@ -99,8 +99,10 @@ pnpm 11+ reads its supply-chain settings from there rather than `.npmrc`.
   `etrade_accounts`, `etrade_balances`, `etrade_positions`,
   `etrade_transactions`, `etrade_disconnect`), `congress.ts`
   (`congress_trades`, `congress_member_profile`, `congress_house_filings`),
-  `cache.ts` (`cache_status`, `cache_clear`). `shared.ts` holds `text`, `failure`, `requireSetup`,
-  `attempt`, the cell formatters and `DISCLAIMER`.
+  `cache.ts` (`cache_status`, `cache_clear`), `technical.ts`
+  (`price_history_stats`), `uk.ts`, `japan.ts`, `watch.ts`. `shared.ts` holds
+  `text`, `failure`, `requireCapabilities`, `attempt`, the cell formatters,
+  `DISCLAIMER`, `TAX_NOTE` and `COST_NOTE`.
 
 Data flows one way: `config` → `http` → `data` → `analysis` → `portfolio` →
 `tools`. `import/no-cycle` is an error in `.oxlintrc.json`; keep it that way.
@@ -267,7 +269,9 @@ operator can override a stored key for one run.
 is described. The first-run flow, the `setup_status` tool and the setup report
 are all generated from it. SEC is `required` (a User-Agent with a real contact
 email — EDGAR has no API key and returns 403 without one). Tiingo, Polygon and
-Alpha Vantage form the `one-of` group `prices`. FRED and BLS are `optional`.
+Alpha Vantage, Alpaca, EODHD, Finnhub, Twelve Data and FMP form the `one-of`
+group `prices`. FRED, EDINET, Companies House and the E*TRADE key pairs are
+`optional`.
 
 Rules: never echo a credential back into tool output, not even partially — the
 transcript may be logged or shared. Prefer an `Authorization` header over a
@@ -325,9 +329,10 @@ with the values as arguments. Both paths land in the same 0600 file.
 1. Register it in a module under `src/tools/`, and wire that module's
    `register*Tools(server)` into `createServer()` in `src/server.ts`. If the
    tool changes the order of operations, update `INSTRUCTIONS` there too.
-2. Guard it with `requireSetup()` if it touches the network — returning the
-   setup page instead of a bare error lets the calling model fix the problem in
-   one turn.
+2. Guard it with `requireCapabilities('sec')` / `('prices')` — naming only what
+   the tool actually uses. Returning the setup page instead of a bare error
+   lets the calling model fix the problem in one turn, and a tool that never
+   touches prices must never demand a price key.
 3. Wrap the handler body in `attempt()` so an upstream failure becomes a
    readable tool error rather than a protocol-level crash.
 4. Return `text()` / `failure()`. Format numbers with `cell`, `pct`, `usd`.
