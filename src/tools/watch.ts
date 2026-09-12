@@ -8,6 +8,7 @@ import { channelAvailability, logPath } from '../watch/channels.ts';
 import {
   latestSnapshot,
   listRules,
+  clearSnapshots,
   putSnapshot,
   recentAlerts,
   recentRuns,
@@ -387,6 +388,43 @@ export function registerWatchTools(server: McpServer): void {
                 'positions change — every alert states the snapshot age, and one ' +
                 'computed from a stale share count says so rather than pretending.' +
                 DISCLAIMER
+            )
+          );
+        })
+      )
+  );
+
+  server.registerTool(
+    'watch_snapshot_clear',
+    {
+      annotations: {
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
+        readOnlyHint: false
+      },
+      description:
+        'Forget the recorded holdings, so price rules have nothing to watch. ' +
+        'Use it when the snapshot no longer describes the book and you are not ' +
+        'ready to replace it — a snapshot is the one input a price rule cannot ' +
+        'sanity-check for itself, so an alert computed from holdings you no ' +
+        'longer have is worse than no alert. Rules are left armed and will ' +
+        'apply to whatever is snapshotted next. Local state only; this never ' +
+        'touches a broker.',
+      inputSchema: z.object({}).meta({ title: 'No arguments' }),
+      title: 'Forget the watch holdings'
+    },
+    () =>
+      Promise.resolve(
+        attempt(() => {
+          const removed = clearSnapshots();
+          return Promise.resolve(
+            text(
+              removed === 0
+                ? 'No holdings snapshot was recorded. Nothing changed.'
+                : `Cleared ${removed} snapshot(s). Price rules have nothing to ` +
+                    'watch until `watch_snapshot_set` records holdings again; ' +
+                    'the rules themselves are untouched.'
             )
           );
         })

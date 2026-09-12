@@ -343,14 +343,15 @@ choice for anything scheduled.
 
 ### Monitor positions between sessions
 
-| Tool                 | What it does                                                                                                         |
-| -------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `watch_status`       | Recent runs, snapshot age, rules armed, file locations. Check this before trusting that anything is being watched    |
-| `watch_alerts`       | Alerts fired, each with the reference price and its date, the observed price and its date, and the rule that tripped |
-| `watch_rules`        | The armed rules and their thresholds                                                                                 |
-| `watch_rule_set`     | Create or update a price-move alarm. Local state only; never touches the broker                                      |
-| `watch_rule_remove`  | Delete a rule and its recorded reference prices                                                                      |
-| `watch_snapshot_set` | Record the holdings to monitor, in the shape `broker_positions` emits                                                |
+| Tool                   | What it does                                                                                                         |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `watch_status`         | Recent runs, snapshot age, rules armed, file locations. Check this before trusting that anything is being watched    |
+| `watch_alerts`         | Alerts fired, each with the reference price and its date, the observed price and its date, and the rule that tripped |
+| `watch_rules`          | The armed rules and their thresholds                                                                                 |
+| `watch_rule_set`       | Create or update a price-move alarm. Local state only; never touches the broker                                      |
+| `watch_rule_remove`    | Delete a rule and its recorded reference prices                                                                      |
+| `watch_snapshot_set`   | Record the holdings to monitor, in the shape `broker_positions` emits                                                |
+| `watch_snapshot_clear` | Forget the recorded holdings, when the snapshot no longer describes the book                                         |
 
 See [Scheduled monitoring](#scheduled-monitoring) for how this runs when no
 session is open, and what it genuinely cannot do.

@@ -332,6 +332,23 @@ export function putSnapshot(snapshot: Omit<Snapshot, 'takenAt'>): void {
     );
 }
 
+/**
+ * Drops every recorded snapshot. Returns how many went.
+ *
+ * The counterpart to `putSnapshot`, and not merely for tidiness: a snapshot
+ * that no longer describes the book is the one input a price rule cannot
+ * sanity-check, so there has to be a way to say "watch nothing" short of
+ * deleting the database. Rules survive — they are armed against whatever is
+ * snapshotted next.
+ */
+export function clearSnapshots(): number {
+  const before = connect().prepare('SELECT COUNT(*) n FROM snapshots').get() as
+    | Row
+    | undefined;
+  connect().prepare('DELETE FROM snapshots').run();
+  return Number(before?.['n'] ?? 0);
+}
+
 export function latestSnapshot(): Snapshot | undefined {
   const row = connect()
     .prepare('SELECT * FROM snapshots ORDER BY taken_at DESC LIMIT 1')

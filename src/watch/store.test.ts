@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { Decimal } from '../math/decimal.ts';
 import {
+  clearSnapshots,
   closeWatchDb,
   finishRun,
   latestSnapshot,
@@ -171,5 +172,43 @@ describe('alerts and runs', () => {
     expect(latest?.outcome).toBe('partial');
     expect(latest?.detail).toBe('no price for BBB');
     expect(latest?.finishedAt).toBeDefined();
+  });
+});
+
+describe('clearSnapshots', () => {
+  it('removes a snapshot that no longer describes the book', () => {
+    // A snapshot is the one input a price rule cannot sanity-check, so there
+    // has to be a way to say "watch nothing" short of deleting the database.
+    putSnapshot({
+      accountIdKey: undefined,
+      cash: new Decimal(0),
+      holdings: [
+        { asOf: '2026-09-11', price: 27.6, shares: 181, ticker: 'HVT' }
+      ],
+      source: 'manual'
+    });
+
+    expect(clearSnapshots()).toBe(1);
+    expect(latestSnapshot()).toBeUndefined();
+  });
+
+  it('reports nothing removed rather than failing on an empty store', () => {
+    expect(clearSnapshots()).toBe(0);
+  });
+
+  it('leaves rules armed for whatever is snapshotted next', () => {
+    upsertRule(rule({ id: 'drawdown' }));
+    putSnapshot({
+      accountIdKey: undefined,
+      cash: new Decimal(0),
+      holdings: [
+        { asOf: '2026-09-11', price: 27.6, shares: 181, ticker: 'HVT' }
+      ],
+      source: 'manual'
+    });
+
+    clearSnapshots();
+
+    expect(listRules().map(armed => armed.id)).toEqual(['drawdown']);
   });
 });
