@@ -54,3 +54,58 @@ describe('redactUrl', () => {
     expect(url.searchParams.get('apikey')).toBe('SECRET');
   });
 });
+
+describe('retryStatuses', () => {
+  it('defaults to treating 404 as permanent', async () => {
+    // A 404 normally means "no such thing"; retrying it wastes quota and time.
+    let calls = 0;
+    const original = globalThis.fetch;
+    globalThis.fetch = () => {
+      calls += 1;
+      return Promise.resolve(new Response('gone', { status: 404 }));
+    };
+
+    try {
+      const { fetchJson } = await import('./client.ts');
+      await fetchJson('https://example.test/x', {
+        rateKey: 'example.test',
+        requestsPerSecond: 1000
+      }).catch(() => undefined);
+      expect(calls).toBe(1);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it('retries 404 when a host opts in', async () => {
+    // E*TRADE intermittently answers a valid, correctly-signed request with a
+    // Tomcat 404. Observed directly: the same URL 404s once, then returns 200
+    // four times running.
+    let calls = 0;
+    const original = globalThis.fetch;
+    globalThis.fetch = () => {
+      calls += 1;
+      return Promise.resolve(
+        calls === 1
+          ? new Response('flake', { status: 404 })
+          : new Response('{"ok":true}', { status: 200 })
+      );
+    };
+
+    try {
+      const { fetchJson } = await import('./client.ts');
+      const result = await fetchJson<{ ok: boolean }>(
+        'https://example.test/y',
+        {
+          rateKey: 'example.test',
+          requestsPerSecond: 1000,
+          retryStatuses: [404]
+        }
+      );
+      expect(result.ok).toBe(true);
+      expect(calls).toBe(2);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+});

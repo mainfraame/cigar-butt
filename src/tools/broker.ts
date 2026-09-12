@@ -553,13 +553,29 @@ export function registerBrokerTools(server: McpServer): void {
 /** Completes the OAuth exchange and reports without echoing a token. */
 async function finishConnect(verifier: string): Promise<ToolResult> {
   await completeAuthorization(verifier);
-  const accounts = await listAccounts();
+
+  // The token is stored by this point, so the connection has succeeded. Listing
+  // accounts is a convenience, and letting it fail the whole call reported a
+  // total failure for a connection that had actually worked — the user would
+  // then re-run the flow and burn another five-minute verifier for nothing.
+  let summary: string;
+  try {
+    const accounts = await listAccounts();
+    summary =
+      `${accounts.length} account(s) visible. Call \`etrade_accounts\` for the ` +
+      'account ID keys.';
+  } catch (error) {
+    summary =
+      'Could not list accounts on this first call: ' +
+      `${error instanceof Error ? error.message : String(error)}\n\n` +
+      'The connection itself succeeded — try `etrade_accounts` directly. ' +
+      'E*TRADE intermittently answers a valid request with HTTP 404.';
+  }
 
   return text(
     `Connected to E*TRADE (${environment()}). The access token is stored in the ` +
       "server's 0600 credential file and survives a restart.\n\n" +
-      `${accounts.length} account(s) visible. Call \`etrade_accounts\` for the ` +
-      `account ID keys.\n\n${TOKEN_LIFECYCLE}`
+      `${summary}\n\n${TOKEN_LIFECYCLE}`
   );
 }
 

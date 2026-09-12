@@ -614,6 +614,12 @@ async function get<T>(
       },
       rateKey: RATE_KEY,
       requestsPerSecond: REQUESTS_PER_SECOND,
+      // E*TRADE intermittently answers a valid, correctly-signed request with
+      // HTTP 404 and a Tomcat error page. Observed directly: the same balance
+      // URL 404s once and then returns 200 four times in a row. A 404 normally
+      // means "no such thing" and must not be retried, so this is opted into
+      // here rather than loosened for every host.
+      retryStatuses: [404, 408, 425, 429, 500, 502, 503, 504],
       searchParams
     });
     touch();

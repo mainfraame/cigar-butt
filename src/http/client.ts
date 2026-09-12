@@ -12,11 +12,17 @@ export interface FetchJsonOptions {
   readonly form?: Readonly<Record<string, string>>;
   readonly headers?: Readonly<Record<string, string>>;
   readonly method?: 'GET' | 'POST';
-  /** Requests per second permitted against this host. */
   /** `text` returns the raw body; the default parses JSON. */
   readonly parse?: 'json' | 'text';
+  /** Requests per second permitted against this host. */
   readonly rateKey: string;
   readonly requestsPerSecond: number;
+  /**
+   * Statuses worth retrying, replacing the default set. Raise this only for a
+   * host observed to fail transiently on a status that normally means
+   * something permanent — see the E*TRADE client for the one case.
+   */
+  readonly retryStatuses?: readonly number[];
   readonly searchParams?: Readonly<Record<string, string | undefined>>;
   readonly signal?: AbortSignal;
 }
@@ -39,7 +45,7 @@ export class HttpError extends Error {
 /** Per-host clock: the earliest time the next request to that host may go out. */
 const nextSlot = new Map<string, number>();
 
-const RETRY_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
+const DEFAULT_RETRY_STATUSES = [408, 425, 429, 500, 502, 503, 504];
 const MAX_ATTEMPTS = 3;
 
 function truncate(text: string, max: number): string {
@@ -177,7 +183,8 @@ export async function fetchJson<T>(
 
     const body = await response.text().catch(() => '');
     const error = new HttpError(response.status, redactUrl(url), body);
-    if (!RETRY_STATUSES.has(response.status) || attempt === MAX_ATTEMPTS) {
+    const retryable = new Set(options.retryStatuses ?? DEFAULT_RETRY_STATUSES);
+    if (!retryable.has(response.status) || attempt === MAX_ATTEMPTS) {
       throw error;
     }
     lastError = error;
