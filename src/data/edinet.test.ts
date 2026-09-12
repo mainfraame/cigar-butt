@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { parseFinancialRows, toSecCode } from './edinet.ts';
+import { parseFinancialRows, parseTsv, toSecCode } from './edinet.ts';
 
 const HEADER = [
   '要素ID',
@@ -126,5 +126,45 @@ describe('parseFinancialRows', () => {
         ['1', '2']
       ])
     ).toThrow(/Unexpected CSV layout/);
+  });
+});
+
+describe('parseTsv', () => {
+  it('strips the quotes EDINET wraps around every field', () => {
+    // The header arrives as `"要素ID"`, not `要素ID`. Splitting on tabs alone
+    // leaves the quotes attached and every column lookup misses.
+    expect(parseTsv('"要素ID"\t"値"\n"jppfs_cor:Assets"\t"100"')).toEqual([
+      ['要素ID', '値'],
+      ['jppfs_cor:Assets', '100']
+    ]);
+  });
+
+  it('keeps a tab that lives inside a quoted field', () => {
+    // Japanese narrative disclosures run to paragraphs inside one cell, and a
+    // naive split shreds them into phantom columns.
+    expect(parseTsv('"a\tb"\t"c"')).toEqual([['a\tb', 'c']]);
+  });
+
+  it('keeps a newline that lives inside a quoted field', () => {
+    // A naive split turns one row into several, silently.
+    expect(parseTsv('"line1\nline2"\t"x"\n"next"\t"y"')).toEqual([
+      ['line1\nline2', 'x'],
+      ['next', 'y']
+    ]);
+  });
+
+  it('unescapes a doubled quote', () => {
+    expect(parseTsv('"say ""hi"""')).toEqual([['say "hi"']]);
+  });
+
+  it('handles CRLF line endings', () => {
+    expect(parseTsv('"a"\t"b"\r\n"c"\t"d"')).toEqual([
+      ['a', 'b'],
+      ['c', 'd']
+    ]);
+  });
+
+  it('drops a trailing blank line rather than emitting an empty row', () => {
+    expect(parseTsv('"a"\t"b"\n')).toEqual([['a', 'b']]);
   });
 });

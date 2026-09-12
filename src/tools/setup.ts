@@ -43,6 +43,16 @@ const credentialForm = z.object({
     .string()
     .optional()
     .meta({ title: 'Alpha Vantage API key (optional)' }),
+  COMPANIES_HOUSE_API_KEY: z
+    .string()
+    .optional()
+    .meta({
+      description:
+        'UK register: company status, liquidation, strike-off, overdue accounts, ' +
+        'charges. Free REST key at ' +
+        'https://developer.company-information.service.gov.uk/',
+      title: 'UK Companies House API key (optional)'
+    }),
   EDINET_API_KEY: z
     .string()
     .optional()

@@ -289,6 +289,29 @@ export const PROVIDERS: readonly ProviderSpec[] = [
     signupUrl: 'https://developer.etrade.com/getting-started'
   },
   {
+    envVar: 'COMPANIES_HOUSE_API_KEY',
+    id: 'companies-house',
+    label: 'UK Companies House',
+    purpose:
+      'The UK statutory register: company status, liquidation and ' +
+      'administration, strike-off proposals, overdue accounts, insolvency ' +
+      'history and registered charges. Powers the UK disqualifier check. It ' +
+      'carries no financials — UK accounts are filed as documents, not data.',
+    rateLimit: '600 requests per 5 minutes',
+    requirement: 'optional',
+    setupSteps: [
+      'Register at https://developer.company-information.service.gov.uk/',
+      'Create an application, then add a **REST API key** to it (not a ' +
+        'streaming key — they are separate and not interchangeable).',
+      'Use the LIVE key rather than the sandbox one; the sandbox register is ' +
+        'test data and will not describe real companies.',
+      'The key is sent as an HTTP Basic username with an empty password, which ' +
+        'this server handles — paste the key alone into ' +
+        'COMPANIES_HOUSE_API_KEY.'
+    ],
+    signupUrl: 'https://developer.company-information.service.gov.uk/'
+  },
+  {
     envVar: 'EDINET_API_KEY',
     id: 'edinet',
     label: 'EDINET (Japan FSA)',

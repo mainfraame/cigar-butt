@@ -10,6 +10,7 @@ import { registerMarketTools } from './tools/market.ts';
 import { registerPortfolioTools } from './tools/portfolio.ts';
 import { registerResearchTools } from './tools/research.ts';
 import { registerSetupTools } from './tools/setup.ts';
+import { registerUkTools } from './tools/uk.ts';
 
 /** Kept in sync with package.json by the build; see tsdown.config.ts. */
 const VERSION = '0.1.0';
@@ -103,6 +104,7 @@ export function createServer(): McpServer {
   registerBrokerTools(server);
   registerCongressTools(server);
   registerJapanTools(server);
+  registerUkTools(server);
   registerCacheTools(server);
 
   return server;

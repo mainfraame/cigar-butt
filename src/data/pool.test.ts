@@ -1,5 +1,9 @@
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { resetCredentialCache } from '../config/store.ts';
 import { HttpError } from '../http/client.ts';
 import {
   budgetsFor,
@@ -48,6 +52,18 @@ const rateLimited = () => () =>
 
 beforeEach(() => {
   resetPoolForTest(':memory:');
+
+  // Point the credential store at an empty file. Without this the tests read
+  // the developer's real ~/.config/cigar-butt/credentials.json, so whether a
+  // provider counts as configured depends on whose machine is running them.
+  const store = join(
+    mkdtempSync(join(tmpdir(), 'cb-pool-')),
+    'credentials.json'
+  );
+  writeFileSync(store, '{}\n');
+  process.env.CIGAR_BUTT_CONFIG = store;
+  resetCredentialCache();
+
   for (const key of Object.keys(process.env)) {
     if (
       key.startsWith('CIGAR_BUTT_RATE_') ||
@@ -64,6 +80,7 @@ beforeEach(() => {
 afterEach(() => {
   closePool();
   process.env = { ...saved };
+  resetCredentialCache();
 });
 
 describe('runPool', () => {

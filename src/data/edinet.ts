@@ -309,8 +309,68 @@ async function downloadCsv(docId: string): Promise<string[][]> {
 
     // UTF-16LE, tab-separated. Decoding as UTF-8 yields mojibake, silently.
     const text = new TextDecoder('utf-16le').decode(archive[name]);
-    return text.split(/\r?\n/).map(line => line.split('\t'));
+    return parseTsv(text);
   });
+}
+
+/**
+ * Tab-separated, but every field is double-quoted and a quoted field may
+ * contain tabs and newlines of its own — Japanese narrative disclosures run to
+ * paragraphs inside a single cell.
+ *
+ * So splitting on tabs and newlines does not work: it shreds long fields into
+ * phantom columns and turns one row into several. Even the header fails, since
+ * it arrives as `"要素ID"` rather than `要素ID`. A quote inside a field is
+ * escaped by doubling, per the usual CSV convention.
+ */
+export function parseTsv(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = '';
+  let quoted = false;
+
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i];
+
+    if (quoted) {
+      if (char === '"') {
+        if (text[i + 1] === '"') {
+          field += '"';
+          i += 1;
+        } else {
+          quoted = false;
+        }
+      } else {
+        field += char;
+      }
+      continue;
+    }
+
+    if (char === '"') {
+      quoted = true;
+    } else if (char === '\t') {
+      row.push(field);
+      field = '';
+    } else if (char === '\n' || char === '\r') {
+      // Only close the row on a newline that is genuinely outside a field.
+      if (field.length > 0 || row.length > 0) {
+        row.push(field);
+        rows.push(row);
+        row = [];
+        field = '';
+      }
+      if (char === '\r' && text[i + 1] === '\n') i += 1;
+    } else {
+      field += char;
+    }
+  }
+
+  if (field.length > 0 || row.length > 0) {
+    row.push(field);
+    rows.push(row);
+  }
+
+  return rows;
 }
 
 /**
