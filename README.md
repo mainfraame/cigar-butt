@@ -358,6 +358,50 @@ its date is arbitrary.
 
 ---
 
+## Scheduled monitoring
+
+`cigar-butt watch` polls your holdings on a timer and alerts on moves beyond a
+threshold you set. Bare `cigar-butt` is still the MCP server — only the explicit
+`watch` subcommand branches away.
+
+```bash
+cigar-butt watch rule add drawdown '*' 10   # alert on any held name moving ±10%
+cigar-butt watch install                     # write a launchd agent (hourly)
+launchctl load -w ~/Library/LaunchAgents/dev.cigar-butt.watch.plist
+cigar-butt watch status
+```
+
+From a session, `watch_snapshot_set`, `watch_rule_set`, `watch_status`,
+`watch_alerts`, `watch_rules` and `watch_rule_remove` do the same over the same
+database. **Nothing here places, modifies or cancels an order.**
+
+**The MCP server cannot schedule anything.** A stdio server is a subprocess and
+dies with its client, and the protocol has no way for a server to reach an
+absent user — on any transport. So the OS scheduler runs a short-lived
+`watch run`, and the server reads what it recorded.
+
+Three limits worth knowing before you rely on it:
+
+- **Alarm latency is the poll interval, one hour by default.** That is what free
+  price tiers buy — Alpha Vantage allows 25 requests a day, Tiingo 50 an hour —
+  and a 20-name book polled every 15 minutes would exhaust them by lunchtime.
+  This is a check, not a tripwire.
+- **Price alarms need no broker.** They run against a stored holdings snapshot
+  using only a price-provider key, so they work overnight, at weekends, and
+  indefinitely.
+- **Broker refresh does not survive midnight.** E\*TRADE tokens die at midnight
+  US Eastern with no refresh token, and re-authorising needs a human to read
+  back a verifier code. So refresh the snapshot when you are authorised; every
+  alert states the snapshot's age rather than pretending it is current.
+
+Alerts go to stderr, a log file, a macOS notification, or a Slack/Discord webhook
+(`CIGAR_BUTT_WATCH_WEBHOOK`). Test one before you need it:
+`cigar-butt watch test macos`. Four mechanisms prevent alert storms — a cooldown,
+a hysteresis latch, optional re-baselining, and one notification per cycle.
+
+See [`docs/scheduling-research.md`](docs/scheduling-research.md) for why this
+shape and not a daemon, and what is genuinely impossible.
+
 ## Price providers and free-tier caps
 
 Quote providers are a **failover pool**, not a fixed chain. A request tries them
