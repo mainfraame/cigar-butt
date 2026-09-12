@@ -254,7 +254,7 @@ export const PROVIDERS: readonly ProviderSpec[] = [
         'matching _SECRET) before the unscoped names, so switching is one ' +
         'variable. The two pairs are NOT interchangeable — a sandbox token is ' +
         'rejected by production even if sent to the right host.',
-      'Finally, run the `etrade_connect` tool. It returns a URL to open, ' +
+      'Finally, run the `broker_connect` tool. It returns a URL to open, ' +
         'E*TRADE shows you a short verifier code, and you paste that back. No ' +
         'browser redirect is involved, so nothing needs to listen on a port. ' +
         'The request token expires 5 minutes after issue, so do not wander off ' +
@@ -262,7 +262,7 @@ export const PROVIDERS: readonly ProviderSpec[] = [
       'Token lifecycle, so nothing surprises you: the access token idles out ' +
         'after 2 hours (the server renews automatically inside that window) and ' +
         'dies at midnight US Eastern, which nothing can renew past. After ' +
-        'midnight, run `etrade_connect` again.'
+        'midnight, run `broker_connect` again.'
     ],
     signupUrl: 'https://us.etrade.com/etx/ris/apikey'
   },
@@ -285,7 +285,7 @@ export const PROVIDERS: readonly ProviderSpec[] = [
       'account so a rebalance can be planned against the actual book. ' +
       'Read-only — this server never places an order. Not interchangeable with ' +
       'the sandbox key; both can be stored at once and switched with the ' +
-      '`etrade_environment` tool.',
+      '`broker_environment` tool.',
     rateLimit: '~2 requests/second and 7,000/hour on the accounts module',
     requirement: 'optional',
     setupSteps: [

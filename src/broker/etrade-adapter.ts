@@ -1,12 +1,17 @@
 import {
   accountBalance,
+  completeAuthorization,
   configuredEnvironments,
   environment,
+  hasAccessToken,
   hasConsumerCredentials,
   listAccounts,
   listTransactions,
   portfolioPositions,
-  setEnvironment
+  renewIfStale,
+  revokeAccessToken,
+  setEnvironment,
+  startAuthorization
 } from '../data/etrade.ts';
 import { dec, ZERO } from '../math/decimal.ts';
 import {
@@ -42,6 +47,20 @@ export const etradeAdapter: BrokerAdapter = {
       type: account.accountType
     })),
 
+  authorize: {
+    begin: async () => ({
+      instructions:
+        'E*TRADE displays a short verification code rather than redirecting ' +
+        'anywhere. The URL is only good for **five minutes**.',
+      url: await startAuthorization()
+    }),
+    complete: completeAuthorization,
+    // The boolean is dropped: a failed renewal is not a failed read, and the
+    // read that follows reports the truth either way.
+    keepAlive: async () => void (await renewIfStale()),
+    revoke: revokeAccessToken
+  },
+
   balances: async accountId => {
     const balance = await accountBalance(accountId);
     return {
@@ -70,6 +89,11 @@ export const etradeAdapter: BrokerAdapter = {
       ?.hasConsumer === true,
 
   isConfigured: () => hasConsumerCredentials(),
+
+  // The consumer key is not a session. A token that expired at midnight leaves
+  // this false while `isConfigured` stays true, which is the whole reason the
+  // two are separate.
+  isConnected: () => hasConsumerCredentials() && hasAccessToken(),
 
   label: () => `E*TRADE (${environment()})`,
 

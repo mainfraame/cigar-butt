@@ -44,9 +44,11 @@ Order of operations, which matters more than any single tool:
    narrative. It is context, not a veto.
 7. \`build_allocation\` only for names actually verified above. A weighting
    implies a level of diligence a screen does not provide.
-8. \`etrade_connect\` then \`etrade_positions\` when the user has an E*TRADE
-   account, rather than having them retype their book. The output carries a
-   JSON block shaped for \`plan_rebalance\`.
+8. \`broker_positions\` when the user has a brokerage account, rather than
+   having them retype their book. It reads every connected broker as one
+   book — a name held at two brokers is one position — and its output carries
+   a JSON block shaped for \`plan_rebalance\`. \`broker_connect\` first if
+   nothing is connected yet.
 9. \`plan_rebalance\` to turn targets plus current holdings into orders.
 
 Rules that hold regardless of what the user asks for:
@@ -71,6 +73,10 @@ Rules that hold regardless of what the user asks for:
   are not observable from anything here and are not estimated; the fee figures
   are statutory charges only and are a hundred times smaller than the real cost
   of trading a thin name.
+- A combined book has no single tax treatment. Where accounts are taxed
+  differently the handoff says \`unknown\`, and that is the honest answer, not a
+  gap to fill: which account a sale comes out of is the user's choice and it
+  decides whether the sale is reportable at all.
 - Never state a tax liability, a tax rate, or a short/long-term
   characterisation. An account whose tax treatment reads \`unknown\` is
   undetermined — do NOT read it as taxable, and do not fill the gap yourself.

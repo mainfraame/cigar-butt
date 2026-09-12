@@ -324,6 +324,10 @@ export const alpacaAdapter: BrokerAdapter = {
 
   isConfigured: () => alpacaAdapter.hasCredentialsFor(environment()),
 
+  // A static key pair is the session: there is no `authorize` step to be
+  // part-way through, so configured and connected are the same state.
+  isConnected: () => alpacaAdapter.hasCredentialsFor(environment()),
+
   label: () => `Alpaca (${LABELS[environment()]})`,
 
   positions: async () => {

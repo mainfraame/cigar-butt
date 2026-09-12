@@ -250,8 +250,8 @@ Proves the OAuth connection works against synthetic data. Instant and self-servi
 7. Also sign the Market Data Agreement inside your brokerage account, or quote data is refused.
 8. An individual key is locked to the user ID that created it. Using it under a different login fails with a deliberately vague error and no authorization screen. It does work across every account under your own login.
 9. Set ETRADE_ENV to "sandbox" or "production" to choose which pair is used. You can hold both at once: the server reads ETRADE_SANDBOX_CONSUMER_KEY / ETRADE_PROD_CONSUMER_KEY (and the matching _SECRET) before the unscoped names, so switching is one variable. The two pairs are NOT interchangeable — a sandbox token is rejected by production even if sent to the right host.
-10. Finally, run the `etrade_connect` tool. It returns a URL to open, E*TRADE shows you a short verifier code, and you paste that back. No browser redirect is involved, so nothing needs to listen on a port. The request token expires 5 minutes after issue, so do not wander off mid-flow.
-11. Token lifecycle, so nothing surprises you: the access token idles out after 2 hours (the server renews automatically inside that window) and dies at midnight US Eastern, which nothing can renew past. After midnight, run `etrade_connect` again.
+10. Finally, run the `broker_connect` tool. It returns a URL to open, E*TRADE shows you a short verifier code, and you paste that back. No browser redirect is involved, so nothing needs to listen on a port. The request token expires 5 minutes after issue, so do not wander off mid-flow.
+11. Token lifecycle, so nothing surprises you: the access token idles out after 2 hours (the server renews automatically inside that window) and dies at midnight US Eastern, which nothing can renew past. After midnight, run `broker_connect` again.
 
 ### E*TRADE sandbox consumer secret
 
@@ -265,7 +265,7 @@ Issued on the same page as the sandbox key.
 
 `ETRADE_PROD_CONSUMER_KEY` — Optional
 
-Reads real holdings, balances and transactions from your E*TRADE account so a rebalance can be planned against the actual book. Read-only — this server never places an order. Not interchangeable with the sandbox key; both can be stored at once and switched with the `etrade_environment` tool.
+Reads real holdings, balances and transactions from your E*TRADE account so a rebalance can be planned against the actual book. Read-only — this server never places an order. Not interchangeable with the sandbox key; both can be stored at once and switched with the `broker_environment` tool.
 
 **Free tier:** ~2 requests/second and 7,000/hour on the accounts module
 

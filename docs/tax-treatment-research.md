@@ -473,7 +473,7 @@ sentence, and is squarely across the line in section D.
 
 The adjacent thing that is in scope, free, and already available: `Position`
 carries `unrealisedGain`. Reporting per-position unrealised gain and loss in
-`etrade_positions` is a statement of a broker-reported fact, and a user who wants
+`broker_positions` is a statement of a broker-reported fact, and a user who wants
 to harvest can read it and decide. That is the correct division of labour.
 
 ### C.5 Refuse or warn differently — **warn, never refuse**

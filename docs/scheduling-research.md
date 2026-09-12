@@ -564,7 +564,7 @@ CREATE TABLE IF NOT EXISTS runs (
 CREATE INDEX IF NOT EXISTS alerts_fired ON alerts (fired_at);
 ```
 
-`snapshots.holdings` deliberately stores the exact JSON shape `etrade_positions`
+`snapshots.holdings` deliberately stores the exact JSON shape `broker_positions`
 already emits for `plan_rebalance`, so a drift rule is `planRebalance()` called
 on stored inputs with no adapter, and a session can plan a rebalance from the
 snapshot when the broker is unreachable.
@@ -639,7 +639,7 @@ across weekends, unattended, forever. It covers essentially all of "portfolio
 monitoring with alarms".
 
 **Tier 2 — position refresh and rebalance drift. Needs a live token.**
-Calls `etrade_positions`' underlying functions to refresh the snapshot and
+Calls `broker_positions`' underlying functions to refresh the snapshot and
 evaluates `drift` rules through `planRebalance`. Available only while a token is
 alive — in practice, from whenever the user authorised until midnight ET.
 
@@ -651,7 +651,7 @@ The daemon's behaviour around the token:
   once the watch is installed.
 - When renewal fails or a read 401s, the run **does not fail silently**. It
   writes `outcome = 'partial'`, fires a distinct `broker_auth` alert
-  ("E\*TRADE authorisation expired — run `etrade_connect` to reauthorise") on the
+  ("E\*TRADE authorisation expired — run `broker_connect` to reauthorise") on the
   same channels, and applies a 12-hour cooldown to it so the user is told once
   per morning rather than hourly all night.
 - Tier 1 continues against the last snapshot. Every alert it produces from a

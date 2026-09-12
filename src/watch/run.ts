@@ -83,7 +83,7 @@ export async function runCycle(options: RunOptions = {}): Promise<CycleResult> {
       alertsFired: 0,
       detail:
         'no positions snapshot. Record one with the `watch_snapshot_set` tool, ' +
-        'passing the holdings `etrade_positions` emits while you are authorised.',
+        'passing the holdings `broker_positions` emits while you are authorised.',
       outcome: 'blind',
       quotesRead: 0,
       tickersBlind: []

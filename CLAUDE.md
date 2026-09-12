@@ -75,6 +75,20 @@ pnpm 11+ reads its supply-chain settings from there rather than `.npmrc`.
 - `src/data/reference.ts` — Polygon listing status, splits and dividends.
   Catches a split between the balance-sheet date and today, which silently makes
   every per-share figure wrong by the split factor.
+- `src/broker/` — the broker-neutral layer. `contract.ts` is the only shape the
+  tools know: `Position`, `Balances`, `BrokerAccount`, `Transaction`,
+  `BrokerAdapter`. Capabilities are optional methods — `authorize` exists on
+  E*TRADE, which needs an OAuth grant, and is absent on Alpaca, whose static
+  key pair *is* the session; `isConnected()` is deliberately distinct from
+  `isConfigured()`, because an E*TRADE consumer key outlives the token that
+  died at midnight. `registry.ts` maps id → adapter, `aggregate.ts` reads
+  every connected broker as one book, and `tax.ts` maps each vendor's account
+  type onto `TaxTreatment`.
+- `src/broker/aggregate.ts` — `openBook` decides scope, `readBook` fetches and
+  combines. Three invariants live here: a combined price is the newest leg's
+  mark carrying _that leg's_ date; a live book never absorbs a paper one; and
+  one broker failing never removes another's positions from the total, it only
+  adds a note saying the total is short.
 - `src/data/etrade.ts` — E*TRADE OAuth 1.0a (hand-signed on `node:crypto`, no
   dependency), accounts, balances, positions and transactions. Read-only; this
   server never places an order. **Every credential is stored per environment**
@@ -95,9 +109,9 @@ pnpm 11+ reads its supply-chain settings from there rather than `.npmrc`.
   (`check_disqualifiers`, `analyze_ticker`, `get_quotes`), `market.ts`
   (`macro_context`, `bank_call_report`, `check_corporate_actions`,
   `short_interest`), `portfolio.ts` (`build_allocation`, `plan_rebalance`,
-  `screen_market`), `broker.ts` (`etrade_connect`, `etrade_environment`,
-  `etrade_accounts`, `etrade_balances`, `etrade_positions`,
-  `etrade_transactions`, `etrade_disconnect`), `congress.ts`
+  `screen_market`), `broker.ts` (`broker_connect`, `broker_environment`,
+  `broker_accounts`, `broker_balances`, `broker_positions`,
+  `broker_transactions`, `broker_disconnect`), `congress.ts`
   (`congress_trades`, `congress_member_profile`, `congress_house_filings`),
   `cache.ts` (`cache_status`, `cache_clear`), `technical.ts`
   (`price_history_stats`), `uk.ts`, `japan.ts`, `watch.ts`. `shared.ts` holds

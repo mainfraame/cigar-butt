@@ -218,7 +218,7 @@ Two things worth knowing before you get there:
   block your IP.
 - **E\*TRADE issues two independent key pairs**, sandbox and production, and
   they are not interchangeable. Both pairs and both access tokens are stored
-  separately, so switching with `etrade_environment` can never sign a
+  separately, so switching with `broker_environment` can never sign a
   production request with sandbox material. Sandbox returns canned data that
   does not match what you asked for — request GOOG, get AAPL — so use it to
   prove the connection works, never to read real numbers.
@@ -295,19 +295,51 @@ diligence a screen does not provide.
 
 Read-only. This server never places, modifies or cancels an order.
 
-| Tool                  | What it does                                                                                                                            |
-| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `etrade_connect`      | OAuth 1.0a handshake. Returns a URL; E\*TRADE shows a short code out of band, which you pass back as `verifier`                         |
-| `etrade_accounts`     | Accounts and the `accountIdKey` every other E\*TRADE tool needs — not the account number the API rejects                                |
-| `etrade_positions`    | Holdings and investable cash, each marked at its last trade with that trade's date, emitted in exactly the shape `plan_rebalance` takes |
-| `etrade_balances`     | Cash available to invest, settled versus unsettled, buying power, margin balance, open margin calls                                     |
-| `etrade_transactions` | Trades, dividends, transfers and fees as a table. E\*TRADE keeps two years                                                              |
-| `etrade_environment`  | Show or switch between sandbox and production without mixing credentials                                                                |
-| `etrade_disconnect`   | Revoke and delete the stored access token, leaving the consumer key in place                                                            |
+Every tool here reads **all connected brokerages as one book**. Two hundred
+shares at one broker and a hundred at another is a three-hundred-share
+position, and weighting it per broker would be wrong at the only level that
+matters. What the combined view never loses is where the shares actually sit:
+a sale happens at a broker, and which one decides its tax consequence.
 
-**Tokens die at midnight US Eastern.** They also go idle after two hours, which
-the server renews automatically; midnight it cannot. There is no refresh token,
-so re-authorising needs a human to read a verifier code back.
+| Tool                  | What it does                                                                                                                                                     |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `broker_connect`      | Authorize a broker that needs it. E\*TRADE returns a URL and shows a short code out of band, which you pass back as `verifier`; Alpaca needs no handshake at all |
+| `broker_accounts`     | Every account at every connected broker, with the `ref` the other tools take and the tax treatment of each                                                       |
+| `broker_positions`    | The whole book, combined per ticker and marked at each broker's last trade with that trade's date, emitted in exactly the shape `plan_rebalance` takes           |
+| `broker_balances`     | Cash available to invest, settled versus unsettled, total value and open margin calls, per account and summed                                                    |
+| `broker_transactions` | Trades, dividends, transfers and fees for **one** account — history is where basis is reconstructed, and interleaving two ledgers would obscure it               |
+| `broker_environment`  | Show or switch which book each broker is pointed at, without mixing credentials                                                                                  |
+| `broker_disconnect`   | Revoke and delete a stored session token, leaving the API keys in place                                                                                          |
+
+Supported today: **E\*TRADE** and **Alpaca**. Adding a third is an adapter
+against `BrokerAdapter` plus one line in the registry — no tool changes.
+
+Four things the combined view does that a per-broker one cannot.
+
+**It never sums a simulated book into a real one.** If one broker is live and
+another is in its paper or sandbox book, the live side is used and the other is
+excluded by name. Synthetic cash folded into a real balance is a figure someone
+could size an allocation against, and E\*TRADE's sandbox in particular answers a
+request for GOOG with AAPL. Pass `broker` to read a simulated book on its own.
+
+**A broker that is down does not hide the rest.** Its accounts are reported as
+missing and every affected total says it is short — a plan built from a book
+that quietly lost a broker is worse than one that admits a gap.
+
+**Tax treatment does not combine.** The same ticker in a Roth and a taxable
+account has no single answer to "does selling realise a gain?". That reads
+`mixed`, the handoff to `plan_rebalance` says `unknown`, and no gain figure is
+offered for those names. Which account a sale comes out of is your decision.
+
+**Disagreeing marks are reported, not averaged.** Two brokers can quote the same
+security differently, usually because one is showing a last trade from an
+earlier session. The newest mark is used and the gap is named.
+
+**E\*TRADE tokens die at midnight US Eastern.** They also go idle after two
+hours, which the server renews automatically; midnight it cannot. There is no
+refresh token, so re-authorising needs a human to read a verifier code back.
+Alpaca uses static API keys and has no such expiry, which makes it the better
+choice for anything scheduled.
 
 ### Monitor positions between sessions
 
@@ -318,7 +350,7 @@ so re-authorising needs a human to read a verifier code back.
 | `watch_rules`        | The armed rules and their thresholds                                                                                 |
 | `watch_rule_set`     | Create or update a price-move alarm. Local state only; never touches the broker                                      |
 | `watch_rule_remove`  | Delete a rule and its recorded reference prices                                                                      |
-| `watch_snapshot_set` | Record the holdings to monitor, in the shape `etrade_positions` emits                                                |
+| `watch_snapshot_set` | Record the holdings to monitor, in the shape `broker_positions` emits                                                |
 
 See [Scheduled monitoring](#scheduled-monitoring) for how this runs when no
 session is open, and what it genuinely cannot do.

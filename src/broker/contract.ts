@@ -134,6 +134,27 @@ export interface Transaction {
  */
 export interface BrokerAdapter {
   readonly accounts: () => Promise<BrokerAccount[]>;
+  /**
+   * Present only on a broker that needs a human to authorize a session.
+   *
+   * Capability by optional method, as the filings adapters do it. E*TRADE has
+   * this because OAuth 1.0a hands the user a code to read back; Alpaca omits
+   * it entirely, because a static key pair is already the session. A caller
+   * checks for the property rather than asking which broker it is holding.
+   */
+  readonly authorize?: {
+    /** Returns the URL the user opens, and what they will see there. */
+    readonly begin: () => Promise<{ instructions: string; url: string }>;
+    readonly complete: (verifier: string) => Promise<void>;
+    /**
+     * Revives a session that has merely idled out, before a read.
+     * Cheap, best-effort, and never fatal: a failure here is as likely to be a
+     * dropped connection as a dead token, and the read that follows says which.
+     */
+    readonly keepAlive?: () => Promise<void>;
+    /** True if a token was actually revoked; false if there was none. */
+    readonly revoke: () => Promise<boolean>;
+  };
   readonly balances: (accountId: string) => Promise<Balances>;
   /** The active environment. */
   readonly environment: () => BrokerEnvironment;
@@ -148,6 +169,17 @@ export interface BrokerAdapter {
   readonly hasCredentialsFor: (environment: BrokerEnvironment) => boolean;
   /** Whether the ACTIVE environment is configured. */
   readonly isConfigured: () => boolean;
+  /**
+   * Whether a read would go out right now.
+   *
+   * Distinct from `isConfigured` because the two come apart: E*TRADE can hold
+   * a consumer key and still have no access token, and a token dies at
+   * midnight while the key lives on. Aggregating across brokers needs to know
+   * which ones can actually answer, and "has credentials" is not that.
+   * A broker with no `authorize` step is connected as soon as it is
+   * configured.
+   */
+  readonly isConnected: () => boolean;
   /** Human-readable, e.g. "E*TRADE (production)". Shown in tool output. */
   readonly label: () => string;
   readonly positions: (accountId: string) => Promise<Position[]>;

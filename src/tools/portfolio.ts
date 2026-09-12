@@ -238,7 +238,7 @@ export function registerPortfolioTools(server: McpServer): void {
           .enum(['roth', 'tax-deferred', 'tax-sheltered', 'taxable', 'unknown'])
           .default('unknown')
           .describe(
-            'How a sale in this account is taxed. `etrade_accounts` reports it. ' +
+            'How a sale in this account is taxed. `broker_accounts` reports it. ' +
               'Leave `unknown` if you do not know — it is NOT a synonym for ' +
               'taxable, and claiming taxable would fabricate a cost.'
           )
@@ -301,7 +301,7 @@ export function registerPortfolioTools(server: McpServer): void {
                   : args.taxTreatment === 'unknown'
                     ? 'No gain figures: the account\u2019s tax treatment was not ' +
                       'given. `unknown` is not taken to mean taxable — that ' +
-                      'would fabricate a cost. `etrade_accounts` reports it.\n\n'
+                      'would fabricate a cost. `broker_accounts` reports it.\n\n'
                     : '') +
                 'Execute the sells before the buys. Selling is the harder half of ' +
                 'this method: a name that has closed its discount has done its job, ' +

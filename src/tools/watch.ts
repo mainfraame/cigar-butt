@@ -80,7 +80,7 @@ export function registerWatchTools(server: McpServer): void {
                       : '') +
                     '\n\n'
                   : '**No holdings snapshot**, so price rules have nothing to watch. ' +
-                    'Call `watch_snapshot_set`, or run `etrade_positions` while ' +
+                    'Call `watch_snapshot_set`, or run `broker_positions` while ' +
                     'authorised and pass its holdings here.\n\n') +
                 '### Channels\n\n' +
                 channelAvailability()
@@ -326,7 +326,7 @@ export function registerWatchTools(server: McpServer): void {
       },
       description:
         'Record the holdings the watch should monitor. Takes exactly the ' +
-        '`holdings` shape `etrade_positions` emits, so its output can be passed ' +
+        '`holdings` shape `broker_positions` emits, so its output can be passed ' +
         'straight through.\n\n' +
         'This is what makes unattended monitoring possible at all: E*TRADE ' +
         'tokens die at midnight US Eastern with no refresh token, so no ' +
