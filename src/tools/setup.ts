@@ -43,6 +43,17 @@ const credentialForm = z.object({
     .string()
     .optional()
     .meta({ title: 'Alpha Vantage API key (optional)' }),
+  EDINET_API_KEY: z
+    .string()
+    .optional()
+    .meta({
+      description:
+        'Japanese filings (FSA EDINET). Free and instant, but the signup has a ' +
+        'trap: get the key at https://api.edinet-fsa.go.jp/WEEE0090.aspx — the ' +
+        'account page renders blank because it relies on a popup. See ' +
+        '`setup_status` for the full walkthrough.',
+      title: 'EDINET API key (optional)'
+    }),
   EODHD_API_KEY: z
     .string()
     .optional()

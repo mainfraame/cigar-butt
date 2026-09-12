@@ -287,6 +287,43 @@ export const PROVIDERS: readonly ProviderSpec[] = [
     signupUrl: 'https://developer.etrade.com/getting-started'
   },
   {
+    envVar: 'EDINET_API_KEY',
+    id: 'edinet',
+    label: 'EDINET (Japan FSA)',
+    purpose:
+      "Japanese regulatory filings — the FSA's equivalent of SEC EDGAR, with " +
+      'XBRL accounts since 2008. This is the one that matters for the method: ' +
+      'net-nets have been far scarcer in the US than in Japan for a decade, so ' +
+      'a Graham screen without it is looking in the wrong market. Free, and ' +
+      'issued instantly.',
+    rateLimit: 'No published cap; treated as 2 requests/second here',
+    requirement: 'optional',
+    setupSteps: [
+      'Create an EDINET account at ' +
+        'https://api.edinet-fsa.go.jp/api/auth/index.aspx?mode=1 and confirm the ' +
+        'link emailed to you. This is a Microsoft identity login.',
+      'THEN GO STRAIGHT TO THE KEY PAGE: ' +
+        'https://api.edinet-fsa.go.jp/WEEE0090.aspx — this is the ' +
+        '「ＡＰＩキー発行画面」(API key issuance screen), and it is a different ' +
+        'page from the account page above.',
+      'Why that matters: after logging in you land back on the account page, ' +
+        'which renders BLANK. It is not broken. Its only job is to call a ' +
+        'window.open() popup pointing at WEEE0090.aspx, so any popup blocker ' +
+        'leaves you staring at an empty page with no error. Brave blocks it ' +
+        'even with Shields disabled, because popup permission is a separate ' +
+        'setting. Navigating to WEEE0090.aspx directly sidesteps the popup ' +
+        'entirely.',
+      'If the key page itself is blank too, the site is a 2008-era ASP.NET ' +
+        'WebForms app and privacy browsers break its postbacks. Use Safari or ' +
+        'Chrome for this one-time step.',
+      'Ignore the browser console warning about an unrecognized ' +
+        'Content-Security-Policy directive. It refers to a deprecated ' +
+        'directive and is unrelated to the blank page.',
+      'Copy the issued key into EDINET_API_KEY.'
+    ],
+    signupUrl: 'https://api.edinet-fsa.go.jp/WEEE0090.aspx'
+  },
+  {
     envVar: 'FRED_API_KEY',
     id: 'fred',
     label: 'FRED (St. Louis Fed)',

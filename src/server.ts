@@ -5,6 +5,7 @@ import { renderSetup, startupBanner } from './setup/report.ts';
 import { registerBrokerTools } from './tools/broker.ts';
 import { registerCacheTools } from './tools/cache.ts';
 import { registerCongressTools } from './tools/congress.ts';
+import { registerJapanTools } from './tools/japan.ts';
 import { registerMarketTools } from './tools/market.ts';
 import { registerPortfolioTools } from './tools/portfolio.ts';
 import { registerResearchTools } from './tools/research.ts';
@@ -54,8 +55,9 @@ Rules that hold regardless of what the user asks for:
   deposits and the securities book are not spare cash. Use \`bank_call_report\`
   on those names — tangible common equity, noncurrent loans, and the allowance
   held against them are the tests that do work on a bank.
-- Net-nets are rare. If the user wants 20 strict names, say when the universe
-  does not contain 20 rather than loosening filters until it does.
+- Net-nets are rare in the US, and far less so in Japan. If a US screen comes
+  up empty, that is a real finding — say so, and offer \`edinet_search\` rather
+  than loosening filters until something qualifies.
 - Flag correlation. Four shipping names in a 20-name book is not four bets.
 - This is not investment advice, and the server is not a financial advisor.
 `.trim();
@@ -100,6 +102,7 @@ export function createServer(): McpServer {
   registerPortfolioTools(server);
   registerBrokerTools(server);
   registerCongressTools(server);
+  registerJapanTools(server);
   registerCacheTools(server);
 
   return server;
