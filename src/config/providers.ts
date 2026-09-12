@@ -101,6 +101,42 @@ export const PROVIDERS: readonly ProviderSpec[] = [
     signupUrl: 'https://www.alphavantage.co/support/#api-key'
   },
   {
+    envVar: 'FINNHUB_API_KEY',
+    group: 'prices',
+    id: 'finnhub',
+    label: 'Finnhub',
+    purpose:
+      'Real-time quotes. The most generous free quote tier here by a wide ' +
+      'margin, which makes it a good primary when screening many names. Its ' +
+      'congressional-trading endpoint is premium and is not used.',
+    rateLimit: '60 calls/minute, no daily cap',
+    requirement: 'one-of',
+    signupUrl: 'https://finnhub.io/register'
+  },
+  {
+    envVar: 'TWELVEDATA_API_KEY',
+    group: 'prices',
+    id: 'twelvedata',
+    label: 'Twelve Data',
+    purpose: 'Quotes with an explicit trade date. A solid mid-tier fallback.',
+    rateLimit: '800 requests/day, 8/minute',
+    requirement: 'one-of',
+    signupUrl: 'https://twelvedata.com/pricing'
+  },
+  {
+    envVar: 'FMP_API_KEY',
+    group: 'prices',
+    id: 'fmp',
+    label: 'Financial Modeling Prep',
+    purpose:
+      'Quotes. Included because one key covers a lot and it extends the pool ' +
+      'when other free tiers are spent — not for its fundamentals, which are a ' +
+      'vendor normalisation of the EDGAR filings this server reads directly.',
+    rateLimit: '250 requests/day on the free tier',
+    requirement: 'one-of',
+    signupUrl: 'https://site.financialmodelingprep.com/developer/docs'
+  },
+  {
     envVar: 'ETRADE_SANDBOX_CONSUMER_KEY',
     group: 'etrade',
     id: 'etrade-sandbox-key',

@@ -353,6 +353,50 @@ its date is arbitrary.
 
 ---
 
+## Price providers and free-tier caps
+
+Quote providers are a **failover pool**, not a fixed chain. A request tries them
+in order and skips any that has no key, is cooling down, or has spent its
+budget. That is what makes a screen of any size survivable on free tiers.
+
+| Provider                | Free tier                                        | Notes                                   |
+| ----------------------- | ------------------------------------------------ | --------------------------------------- |
+| Tiingo                  | 50/hour, 1,000/day, **500 unique symbols/month** | Split- and dividend-adjusted. Best data |
+| Polygon.io              | 5/minute, no daily cap                           | Every paid tier is unlimited            |
+| Finnhub                 | 60/minute, no daily cap                          | Most generous free quote tier           |
+| Twelve Data             | 8/minute, 800/day                                | Carries an explicit trade date          |
+| Financial Modeling Prep | 250/day                                          | Extends the pool when others are spent  |
+| Alpha Vantage           | 5/minute, **25/day**                             | Effectively a spot-check                |
+
+**Usage is counted locally and checked before a request goes out**, against each
+service's documented limits — not inferred from a 429 afterwards. On a daily cap
+that distinction matters: the rejected call still counts against you, so
+learning reactively spends a request that was never going to work. A 429 is
+still honoured as a backstop, since the same key may be in use elsewhere.
+
+Counters live in SQLite and persist across restarts, because a daily quota does
+not reset just because the process did. Windows roll over on their own — a new
+minute, hour, day or month is a new counter, and the old one stops applying.
+
+Note Tiingo meters **unique symbols per month**, not just requests. A single
+200-name screen spends 40% of a month while the request counters still look
+healthy, so that budget is tracked as distinct symbols; re-reading one already
+counted this month is free.
+
+### If you pay for a plan
+
+The defaults above are free-tier limits. Without overriding them, a paid plan is
+throttled to free speed:
+
+| Variable                                | Effect                                                                                            |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `CIGAR_BUTT_BUDGET_<PROVIDER>_<PERIOD>` | Call budget, e.g. `CIGAR_BUTT_BUDGET_POLYGON_MINUTE=0`. **0 means unlimited**                     |
+| `CIGAR_BUTT_RATE_<PROVIDER>`            | Requests per second, e.g. `CIGAR_BUTT_RATE_POLYGON=100`                                           |
+| `CIGAR_BUTT_PROVIDER_ORDER`             | Preference order, e.g. `polygon,tiingo`. Unlisted providers keep their default order behind these |
+
+`provider_status` shows every provider's key, rate, budget consumption and
+cooldown, and can clear recorded caps.
+
 ## Caching
 
 Responses are cached in SQLite (`node:sqlite` — built into Node 24, no

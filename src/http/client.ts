@@ -21,7 +21,7 @@ export interface FetchJsonOptions {
   readonly signal?: AbortSignal;
 }
 
-class HttpError extends Error {
+export class HttpError extends Error {
   readonly body: string;
   readonly status: number;
 

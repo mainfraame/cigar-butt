@@ -1,166 +1,293 @@
 import { cached, TTL } from '../cache/store.ts';
-import { providerById } from '../config/providers.ts';
-import { getCredential } from '../config/store.ts';
 import { fetchJson } from '../http/client.ts';
+import {
+  poolStatus,
+  runPool,
+  sweepUsage,
+  type Provider,
+  type ProviderStatus
+} from './pool.ts';
 
 /**
- * Prices. Three providers, tried in order of how much they can be trusted and
- * how much of them the free tier gives you:
+ * Quotes, from whichever provider can currently answer.
  *
- *   Tiingo       — split- and dividend-adjusted closes. First choice.
- *   Polygon      — previous close; also the only source here for whole-market
- *                  bars and delisting reference data.
- *   Alpha Vantage— last resort. 25 requests/day makes it a spot-check.
+ * The providers below are interchangeable for this purpose, so they are a pool
+ * rather than a hardcoded chain: one that has no key is skipped, one that
+ * reports a cap is put on a cooldown, and the next is tried. That is what makes
+ * a screen of any size survivable on free tiers, where Alpha Vantage allows ~25
+ * requests a day and Polygon 5 a minute.
  *
- * Every quote carries the date its figure is *as of*. Undated prices are the
- * single largest source of wrong answers in this domain: the same ticker can
- * come back 60% apart from two caches minutes apart, and the number without its
- * date is arbitrary.
+ * Every quote carries the date its figure is *as of* and the provider that
+ * served it. Undated prices are the single largest source of wrong answers in
+ * this domain — the same ticker has come back 60% apart from two caches minutes
+ * apart — and naming the provider is what makes two disagreeing figures
+ * diagnosable rather than merely confusing.
  */
 
 export interface Quote {
   /** ISO date the close is for. Never omitted. */
   readonly asOf: string;
   readonly price: number;
-  readonly source: 'alphavantage' | 'polygon' | 'tiingo';
+  /** Which provider served it. Not a fixed union: the pool is extensible. */
+  readonly source: string;
   readonly ticker: string;
 }
 
-interface AlphaVantageQuote {
-  'Global Quote'?: { '05. price'?: string; '07. latest trading day'?: string };
-  Information?: string;
-  Note?: string;
-}
+type Num = number | string | undefined;
 
-interface PolygonPrevClose {
-  results?: { c?: number; T?: string; t?: number }[];
-  status?: string;
-}
+/** Alpha Vantage answers HTTP 200 with prose when the daily cap is spent. */
+const PROSE_CAP = /rate limit|higher api call|premium|thank you for using/i;
 
-interface TiingoPriceRow {
-  adjClose?: number;
-  close?: number;
-  date?: string;
-}
-
-async function tiingoQuote(ticker: string, key: string): Promise<Quote> {
-  const rows = await fetchJson<TiingoPriceRow[]>(
-    `https://api.tiingo.com/tiingo/daily/${encodeURIComponent(ticker)}/prices`,
-    {
-      headers: { authorization: `Token ${key}` },
-      rateKey: 'api.tiingo.com',
-      requestsPerSecond: 2
-    }
+function bad(provider: string, ticker: string, detail = ''): Error {
+  return new Error(
+    `${provider} returned no usable quote for ${ticker}${detail}`
   );
+}
 
-  const row = rows.at(-1);
-  const price = row?.adjClose ?? row?.close;
-  if (!row?.date || typeof price !== 'number') {
-    throw new Error(`Tiingo returned no usable price row for ${ticker}.`);
+function toQuote(
+  source: string,
+  ticker: string,
+  price: Num,
+  asOf: string | undefined
+): Quote {
+  const value = Number(price);
+  if (!asOf || !Number.isFinite(value) || value <= 0) {
+    throw bad(source, ticker);
   }
   return {
-    asOf: row.date.slice(0, 10),
-    price,
-    source: 'tiingo',
+    asOf: asOf.slice(0, 10),
+    price: value,
+    source,
     ticker: ticker.toUpperCase()
   };
 }
 
-async function polygonQuote(ticker: string, key: string): Promise<Quote> {
-  const data = await fetchJson<PolygonPrevClose>(
-    `https://api.polygon.io/v2/aggs/ticker/${encodeURIComponent(ticker)}/prev`,
-    {
-      // Header rather than the apiKey query parameter, so the key stays out of
-      // shell history, proxy logs, and any error that echoes the URL.
-      headers: { authorization: `Bearer ${key}` },
-      rateKey: 'api.polygon.io',
-      requestsPerSecond: 0.08
-    }
-  );
+/* ------------------------------------------------------------- providers */
 
-  const result = data.results?.[0];
-  if (typeof result?.c !== 'number' || typeof result.t !== 'number') {
-    throw new Error(`Polygon returned no previous close for ${ticker}.`);
+const tiingo: Provider<Quote> = {
+  // Verified on tiingo.com/about/pricing: 50 requests/hour, 1,000/day, and
+  // 500 unique symbols/month. The symbol cap is the one that bites — a single
+  // 200-name screen spends 40% of a month while the request counters look fine.
+  budgets: [
+    { limit: 50, per: 'hour' },
+    { limit: 1000, per: 'day' },
+    { limit: 500, per: 'month', unit: 'symbols' }
+  ],
+  id: 'tiingo',
+  label: 'Tiingo',
+  quotaCooldownSeconds: 60 * 60,
+  requestsPerSecond: 2,
+  run: async (ticker, key, rate) => {
+    const rows = await fetchJson<
+      { adjClose?: Num; close?: Num; date?: string }[]
+    >(
+      `https://api.tiingo.com/tiingo/daily/${encodeURIComponent(ticker)}/prices`,
+      {
+        headers: { authorization: `Token ${key}` },
+        rateKey: 'api.tiingo.com',
+        requestsPerSecond: rate
+      }
+    );
+    const row = rows.at(-1);
+    // adjClose is split- AND dividend-adjusted; for a value screen the
+    // dividend is often a large share of the return, so prefer it.
+    return toQuote('tiingo', ticker, row?.adjClose ?? row?.close, row?.date);
   }
-  return {
-    asOf: new Date(result.t).toISOString().slice(0, 10),
-    price: result.c,
-    source: 'polygon',
-    ticker: ticker.toUpperCase()
-  };
-}
+};
 
-async function alphaVantageQuote(ticker: string, key: string): Promise<Quote> {
-  const data = await fetchJson<AlphaVantageQuote>(
-    'https://www.alphavantage.co/query',
-    {
-      rateKey: 'www.alphavantage.co',
-      requestsPerSecond: 0.08,
-      // Alpha Vantage supports no header alternative, so the key rides in the
-      // query string. redactUrl in the HTTP client scrubs it from errors.
-      searchParams: { apikey: key, function: 'GLOBAL_QUOTE', symbol: ticker }
-    }
-  );
-
-  // The free tier answers 200 with a prose "Note"/"Information" body when the
-  // daily cap is hit, so an absent quote is not necessarily a bad ticker.
-  const globalQuote = data['Global Quote'];
-  const price = Number(globalQuote?.['05. price']);
-  const asOf = globalQuote?.['07. latest trading day'];
-  if (!asOf || !Number.isFinite(price) || price <= 0) {
-    throw new Error(
-      `Alpha Vantage returned no quote for ${ticker}` +
-        `${(data.Note ?? data.Information) ? ': rate limit or plan message returned' : ''}.`
+const polygon: Provider<Quote> = {
+  // 5/minute on the free Basic plan; every paid tier is unlimited. Someone on
+  // a paid plan should set CIGAR_BUTT_BUDGET_POLYGON_MINUTE=0.
+  budgets: [{ limit: 5, per: 'minute' }],
+  id: 'polygon',
+  label: 'Polygon.io',
+  quotaCooldownSeconds: 60,
+  // 5/minute on the free Basic plan. Paid plans are far higher — override with
+  // CIGAR_BUTT_RATE_POLYGON rather than editing this.
+  requestsPerSecond: 0.08,
+  run: async (ticker, key, rate) => {
+    const data = await fetchJson<{ results?: { c?: number; t?: number }[] }>(
+      `https://api.polygon.io/v2/aggs/ticker/${encodeURIComponent(ticker)}/prev`,
+      {
+        // Header rather than the apiKey query parameter, so the key stays out
+        // of shell history, proxy logs, and any error that echoes the URL.
+        headers: { authorization: `Bearer ${key}` },
+        rateKey: 'api.polygon.io',
+        requestsPerSecond: rate
+      }
+    );
+    const result = data.results?.[0];
+    return toQuote(
+      'polygon',
+      ticker,
+      result?.c,
+      typeof result?.t === 'number'
+        ? new Date(result.t).toISOString()
+        : undefined
     );
   }
-  return { asOf, price, source: 'alphavantage', ticker: ticker.toUpperCase() };
-}
+};
+
+const alphavantage: Provider<Quote> = {
+  // 25 requests/day, and 5/minute alongside it.
+  budgets: [
+    { limit: 5, per: 'minute' },
+    { limit: 25, per: 'day' }
+  ],
+  id: 'alphavantage',
+  isQuotaError: error => PROSE_CAP.test(String(error)),
+  label: 'Alpha Vantage',
+  // ~25 requests/day, so a cap costs the rest of the day rather than a minute.
+  quotaCooldownSeconds: 6 * 60 * 60,
+  requestsPerSecond: 0.08,
+  run: async (ticker, key, rate) => {
+    const data = await fetchJson<{
+      'Global Quote'?: {
+        '05. price'?: string;
+        '07. latest trading day'?: string;
+      };
+      Information?: string;
+      Note?: string;
+    }>('https://www.alphavantage.co/query', {
+      rateKey: 'www.alphavantage.co',
+      requestsPerSecond: rate,
+      // No header alternative exists here, so the key rides in the query
+      // string; redactUrl in the HTTP client scrubs it from any error.
+      searchParams: { apikey: key, function: 'GLOBAL_QUOTE', symbol: ticker }
+    });
+
+    // The free tier answers 200 with a prose body once the cap is spent, so a
+    // missing quote is not necessarily a bad ticker.
+    const message = data.Note ?? data.Information;
+    if (message) throw bad('alphavantage', ticker, `: ${message}`);
+    return toQuote(
+      'alphavantage',
+      ticker,
+      data['Global Quote']?.['05. price'],
+      data['Global Quote']?.['07. latest trading day']
+    );
+  }
+};
+
+const fmp: Provider<Quote> = {
+  budgets: [{ limit: 250, per: 'day' }],
+  id: 'fmp',
+  isQuotaError: error => PROSE_CAP.test(String(error)),
+  label: 'Financial Modeling Prep',
+  quotaCooldownSeconds: 6 * 60 * 60,
+  requestsPerSecond: 1,
+  run: async (ticker, key, rate) => {
+    const rows = await fetchJson<{ price?: Num; symbol?: string }[]>(
+      'https://financialmodelingprep.com/stable/quote',
+      {
+        rateKey: 'financialmodelingprep.com',
+        requestsPerSecond: rate,
+        searchParams: { apikey: key, symbol: ticker }
+      }
+    );
+    // FMP's quote carries no trade date, only a timestamp on some plans. The
+    // honest as-of is today: claiming a date the payload does not contain is
+    // exactly the failure this server exists to prevent.
+    return toQuote(
+      'fmp',
+      ticker,
+      rows[0]?.price,
+      new Date().toISOString().slice(0, 10)
+    );
+  }
+};
+
+const twelvedata: Provider<Quote> = {
+  // 800 credits/day and 8/minute; a quote costs one credit.
+  budgets: [
+    { limit: 8, per: 'minute' },
+    { limit: 800, per: 'day' }
+  ],
+  id: 'twelvedata',
+  isQuotaError: error =>
+    /run out of api credits|\bcode.{0,4}429/i.test(String(error)),
+  label: 'Twelve Data',
+  quotaCooldownSeconds: 60 * 60,
+  requestsPerSecond: 0.13,
+  run: async (ticker, key, rate) => {
+    const data = await fetchJson<{
+      close?: Num;
+      datetime?: string;
+      message?: string;
+      status?: string;
+    }>('https://api.twelvedata.com/quote', {
+      rateKey: 'api.twelvedata.com',
+      requestsPerSecond: rate,
+      searchParams: { apikey: key, symbol: ticker }
+    });
+    if (data.status === 'error')
+      throw bad('twelvedata', ticker, `: ${data.message}`);
+    return toQuote('twelvedata', ticker, data.close, data.datetime);
+  }
+};
+
+const finnhub: Provider<Quote> = {
+  // The most generous free tier here: 60/minute with no daily cap.
+  budgets: [{ limit: 60, per: 'minute' }],
+  id: 'finnhub',
+  label: 'Finnhub',
+  quotaCooldownSeconds: 60,
+  requestsPerSecond: 1,
+  run: async (ticker, key, rate) => {
+    const data = await fetchJson<{ c?: number; t?: number }>(
+      'https://finnhub.io/api/v1/quote',
+      {
+        headers: { 'x-finnhub-token': key },
+        rateKey: 'finnhub.io',
+        requestsPerSecond: rate,
+        searchParams: { symbol: ticker }
+      }
+    );
+    // Finnhub answers 200 with c=0 for a symbol it does not cover.
+    return toQuote(
+      'finnhub',
+      ticker,
+      data.c,
+      typeof data.t === 'number' && data.t > 0
+        ? new Date(data.t * 1000).toISOString()
+        : undefined
+    );
+  }
+};
 
 /**
- * Fetches one quote, falling through the provider list. Every provider's
- * failure is reported if all of them fail — a single "no price" message hides
- * which of "bad ticker", "no key", and "rate limited" actually happened.
+ * Declared order is the fallback order, best-trusted first. A user can put the
+ * service they pay for at the front with CIGAR_BUTT_PROVIDER_ORDER.
  */
-async function quote(ticker: string): Promise<Quote> {
-  const attempts: {
-    fn: (t: string, k: string) => Promise<Quote>;
-    id: string;
-  }[] = [
-    { fn: tiingoQuote, id: 'tiingo' },
-    { fn: polygonQuote, id: 'polygon' },
-    { fn: alphaVantageQuote, id: 'alphavantage' }
-  ];
+const QUOTE_PROVIDERS: readonly Provider<Quote>[] = [
+  tiingo,
+  polygon,
+  finnhub,
+  twelvedata,
+  fmp,
+  alphavantage
+];
 
-  const failures: string[] = [];
-  for (const attempt of attempts) {
-    const spec = providerById(attempt.id);
-    const key = spec ? getCredential(spec.envVar) : undefined;
-    if (!key) {
-      failures.push(`${attempt.id}: no API key configured`);
-      continue;
-    }
-    try {
-      // Cached under the provider, not just the ticker: two providers can
-      // legitimately disagree, and blending them under one key would hide it.
-      return await cached(
-        'quote',
-        `${attempt.id}/${ticker.toUpperCase()}`,
-        TTL.prices,
-        () => attempt.fn(ticker, key)
-      );
-    } catch (error) {
-      failures.push(
-        `${attempt.id}: ${error instanceof Error ? error.message : String(error)}`
-      );
-    }
-  }
+/* ----------------------------------------------------------------- public */
 
-  throw new Error(
-    `No price available for ${ticker}. Tried:\n${failures.map(f => `  - ${f}`).join('\n')}`
-  );
+export function quoteProviderStatus(): ProviderStatus[] {
+  // Cheap, and keeps the usage tables from accumulating rolled-over windows.
+  sweepUsage();
+  return poolStatus(QUOTE_PROVIDERS);
 }
 
-/** Quotes for many tickers. Partial success is the normal case; report both halves. */
+/** One quote, from whichever provider answers first. */
+async function quote(ticker: string): Promise<Quote> {
+  const symbol = ticker.trim().toUpperCase();
+  // Cached per provider-agnostic symbol: whichever source served it, the cache
+  // entry records which one, so a later reader can still see the provenance.
+  return cached('quote', symbol, TTL.prices, async () => {
+    const outcome = await runPool(QUOTE_PROVIDERS, symbol);
+    return outcome.value;
+  });
+}
+
+/** Quotes for many tickers. Partial success is normal; report both halves. */
 export async function quotes(
   tickers: readonly string[]
 ): Promise<{ failed: { reason: string; ticker: string }[]; quotes: Quote[] }> {

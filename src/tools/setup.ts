@@ -58,6 +58,19 @@ const credentialForm = z.object({
     .string()
     .optional()
     .meta({ title: 'E*TRADE sandbox consumer secret (optional)' }),
+  FINNHUB_API_KEY: z
+    .string()
+    .optional()
+    .meta({
+      description:
+        'Quotes. The most generous free tier here — 60 calls/minute. Free key at ' +
+        'https://finnhub.io/register',
+      title: 'Finnhub API key (optional)'
+    }),
+  FMP_API_KEY: z
+    .string()
+    .optional()
+    .meta({ title: 'Financial Modeling Prep API key (optional)' }),
   FRED_API_KEY: z
     .string()
     .optional()
@@ -79,7 +92,11 @@ const credentialForm = z.object({
     description:
       'Recommended price source. Free key at https://www.tiingo.com/account/api/token',
     title: 'Tiingo API token'
-  })
+  }),
+  TWELVEDATA_API_KEY: z
+    .string()
+    .optional()
+    .meta({ title: 'Twelve Data API key (optional)' })
 });
 
 export function registerSetupTools(server: McpServer): void {
