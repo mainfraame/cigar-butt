@@ -115,3 +115,57 @@ describe('burnProfile', () => {
     expect(profile.runwayYears).toBeUndefined();
   });
 });
+
+describe('working-capital cover', () => {
+  it('separates a fast burn from a slow one', async () => {
+    // Geospace burns $36.5M against $39.4M of net current assets; Clarus
+    // burns $4.8M against $116.8M. Both read as "operations consume cash",
+    // and the cover is the number that tells them apart.
+    facts.set(FLOW, [fact('2024-10-01', '2025-09-30', -36_464_000)]);
+    const fast = await burnProfile(
+      '1001115',
+      dec(2_833_000),
+      dec(68_809_000),
+      dec(39_392_000)
+    );
+
+    facts.set(FLOW, [fact('2025-01-01', '2025-12-31', -4_786_000)]);
+    const slow = await burnProfile(
+      '913277',
+      dec(28_925_000),
+      dec(173_555_000),
+      dec(116_797_000)
+    );
+
+    expect(Number(fast.workingCapitalYears?.toFixed(1))).toBeCloseTo(1.1, 1);
+    expect(Number(slow.workingCapitalYears?.toFixed(0))).toBeCloseTo(24, 0);
+  });
+
+  it('offers no cover for a cash box, which gets a runway instead', async () => {
+    facts.set(FLOW, [fact('2026-01-01', '2026-06-30', -23_500_000, '10-Q')]);
+
+    const profile = await burnProfile(
+      '34956',
+      dec(118_000_000),
+      dec(121_663_000),
+      dec(113_590_000)
+    );
+
+    expect(profile.runwayYears).toBeDefined();
+    expect(profile.workingCapitalYears).toBeUndefined();
+  });
+
+  it('offers no cover for a business that funds itself', async () => {
+    facts.set(FLOW, [fact('2025-01-01', '2025-12-31', 6_863_000)]);
+
+    const profile = await burnProfile(
+      '910329',
+      dec(71_910_000),
+      dec(202_034_000),
+      dec(138_010_000)
+    );
+
+    expect(profile.selfFunding).toBe(true);
+    expect(profile.workingCapitalYears).toBeUndefined();
+  });
+});

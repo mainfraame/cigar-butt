@@ -68,6 +68,20 @@ export interface BurnProfile {
    * an unknown burn is exactly the case where a runway figure would mislead.
    */
   readonly selfFunding: boolean | undefined;
+  /**
+   * Net current assets over the burn, for a business funded by working
+   * capital rather than by a cash pile.
+   *
+   * Declining to give a runway was right and left nothing in its place, so a
+   * seismic-equipment maker burning $36.5M and an outdoor-gear maker burning
+   * $4.8M read identically as "operations consume cash". Against net current
+   * assets those are 1.1 years and 24 years — the difference between a
+   * situation and a statistic.
+   *
+   * An outer bound, not a countdown: the business needs its inventory and
+   * receivables to trade at all, so it fails long before this reaches zero.
+   */
+  readonly workingCapitalYears: Decimal | undefined;
 }
 
 /** Months a fact covers, from its own start and end. */
@@ -97,7 +111,8 @@ const toPeriod = (fact: CompanyFact): Period | undefined => {
 export async function burnProfile(
   cik: string,
   cash: Decimal | undefined,
-  currentAssets?: Decimal
+  currentAssets?: Decimal,
+  netCurrentAssets?: Decimal
 ): Promise<BurnProfile> {
   const flows = await companyConcept(cik, CASH_FLOW);
 
@@ -164,6 +179,13 @@ export async function burnProfile(
       gtZero(cash)
         ? div(cash, annualised.abs())
         : undefined,
-    selfFunding
+    selfFunding,
+    workingCapitalYears:
+      !isCashBox &&
+      annualised !== undefined &&
+      annualised.isNegative() &&
+      gtZero(netCurrentAssets)
+        ? div(netCurrentAssets, annualised.abs())
+        : undefined
   };
 }

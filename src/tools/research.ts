@@ -217,7 +217,8 @@ export function registerResearchTools(server: McpServer): void {
         const burn = await burnProfile(
           cik,
           sheet.cash?.value,
-          sheet.assetsCurrent?.value
+          sheet.assetsCurrent?.value,
+          metrics.ncav
         );
 
         const vendorShares = await attemptShares(entry.ticker);
@@ -319,13 +320,20 @@ export function registerResearchTools(server: McpServer): void {
                 'contract or an exclusivity is not burning at last year\u2019s ' +
                 'rate.' +
                 (burn.runwayYears === undefined
-                  ? ' No runway figure is offered: cash is ' +
+                  ? ' No cash runway is offered: cash is ' +
                     `${burn.cashShare === undefined ? 'an unknown share' : pct(out(burn.cashShare) ?? 0)} ` +
                     'of current assets, so this is a business funded by a ' +
-                    'working-capital cycle rather than a cash box. Dividing its ' +
-                    'cash by its burn produces a countdown that does not ' +
-                    'describe anything — inventory and receivables convert, and ' +
-                    'a manufacturer holding a fortnight of cash is normal.\n\n'
+                    'working-capital cycle rather than a cash box, and cash ' +
+                    'over burn would be a countdown that describes nothing.' +
+                    (burn.workingCapitalYears === undefined
+                      ? '\n\n'
+                      : ` Against **net current assets** the burn is covered ` +
+                        `**${out(burn.workingCapitalYears, 1)} times over**. ` +
+                        'That is an outer bound rather than a deadline — the ' +
+                        'business needs its inventory and receivables to trade ' +
+                        'at all, so it fails well before the figure reaches ' +
+                        'zero — but it is the number that separates a slow ' +
+                        'decline from a situation.\n\n')
                   : ` That is **${out(burn.runwayYears, 1)} years** of runway ` +
                     'against the cash on the balance sheet, which is the right ' +
                     `measure here because cash is ${pct(out(burn.cashShare) ?? 0)} of ` +
