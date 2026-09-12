@@ -34,6 +34,48 @@ interface CacheOptions {
   readonly path?: string;
 }
 
+/**
+ * Every namespace `cached()` is called with, so `cache_clear` can name them.
+ *
+ * A namespace missing from here cannot be cleared individually, which matters
+ * more than it sounds: a day list that came back empty during an outage sits
+ * in the cache for a week, and the only way out was deleting the whole
+ * database. `cache-namespaces.test.ts` fails if a call site uses a namespace
+ * that is not listed.
+ */
+export const CACHE_NAMESPACES = [
+  'alpaca-clock',
+  'bars',
+  'ch-profile',
+  'ch-search',
+  'congress-committees',
+  'congress-house-index',
+  'congress-membership',
+  'congress-senate-annual',
+  'congress-senate-annual-list',
+  'congress-senate-list',
+  'congress-senate-ptr',
+  'edinet-csv',
+  'edinet-day',
+  'etrade-accounts',
+  'etrade-balance',
+  'etrade-portfolio',
+  'etrade-transactions',
+  'fdic-financials',
+  'fdic-institution',
+  'finra-short-interest',
+  'fred',
+  'fx',
+  'polygon-dividends',
+  'polygon-splits',
+  'polygon-ticker',
+  'quote',
+  'sec-concept',
+  'sec-frames',
+  'sec-submissions',
+  'sec-tickers'
+] as const;
+
 /** Seconds. Chosen by how often the underlying fact can actually change. */
 export const TTL = {
   /** A past daily bar never changes; only the last one is volatile. */

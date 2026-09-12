@@ -285,8 +285,9 @@ export function registerResearchTools(server: McpServer): void {
       annotations: { openWorldHint: true, readOnlyHint: true },
       description:
         'Current prices for a list of tickers, each with the date it is as of and ' +
-        'the provider it came from. Providers are tried in order (Tiingo, Polygon, ' +
-        'Alpha Vantage) and every failure is reported, so "no key", "bad ticker" and ' +
+        'the provider it came from. Providers are a failover pool tried in ' +
+        'order — `provider_status` shows which and why — and every failure is ' +
+        'reported, so "no key", "bad ticker" and ' +
         '"rate limited" stay distinguishable.',
       inputSchema: z.object({
         tickers: z.array(tickerArg).min(1).max(100)

@@ -271,8 +271,13 @@ export function registerMarketTools(server: McpServer): void {
             `${reference.delistedOn ? ` as of ${reference.delistedOn}` : ''} · ` +
             `${cell(reference.exchange)} · listed ${cell(reference.listedOn)} · ` +
             `CIK ${cell(reference.cik)}\n\n` +
-            `Shares outstanding: ${cell(reference.sharesOutstanding?.toLocaleString('en-US'))} ` +
-            `(Polygon record last updated ${cell(reference.lastUpdated)})\n\n` +
+            `Shares outstanding: ${cell(reference.sharesOutstanding?.toLocaleString('en-US'))}` +
+            // The parenthetical is the figure's date, so with no date there is
+            // nothing to put in it. "(last updated —)" reads as a rendering
+            // fault and, worse, implies a date was checked and found empty.
+            `${reference.lastUpdated ? ` (Polygon record last updated ${reference.lastUpdated})` : ''}` +
+            `${reference.sharesOutstanding === undefined ? '' : ' — a vendor figure, and for a dual-class filer it may count one class only'}` +
+            '\n\n' +
             (reference.active
               ? ''
               : '**This ticker no longer trades.** Whatever the balance sheet says, ' +

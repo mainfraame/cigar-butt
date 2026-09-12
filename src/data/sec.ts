@@ -14,6 +14,17 @@ import { fetchJson } from '../http/client.ts';
 
 const SEC_RATE = { rateKey: 'data.sec.gov', requestsPerSecond: 8 } as const;
 
+/**
+ * The share count on a filing's cover page.
+ *
+ * Every 10-K and 10-Q carries this in the `dei` taxonomy, and it is the one
+ * place a share count is reliably tagged: Haverty, among others, stopped
+ * tagging `us-gaap:CommonStockSharesOutstanding` years ago while still filing
+ * quarterly, which left P/TBV — the primary Schloss test — reading `n/a` on a
+ * company whose share count was in plain sight.
+ */
+export const COVER_SHARES = 'EntityCommonStockSharesOutstanding';
+
 /** us-gaap concepts this server reads. */
 export const CONCEPTS = {
   assetsCurrent: 'AssetsCurrent',
@@ -145,16 +156,17 @@ export async function resolveTicker(ticker: string): Promise<TickerEntry> {
  */
 export async function companyConcept(
   cik: string,
-  concept: string
+  concept: string,
+  taxonomy: 'dei' | 'us-gaap' = 'us-gaap'
 ): Promise<CompanyFact[]> {
   try {
     const data = await cached(
       'sec-concept',
-      `${padCik(cik)}/${concept}`,
+      `${padCik(cik)}/${taxonomy}/${concept}`,
       TTL.fundamentals,
       () =>
         fetchJson<CompanyConceptResponse>(
-          `https://data.sec.gov/api/xbrl/companyconcept/CIK${padCik(cik)}/us-gaap/${concept}.json`,
+          `https://data.sec.gov/api/xbrl/companyconcept/CIK${padCik(cik)}/${taxonomy}/${concept}.json`,
           { ...SEC_RATE, headers: headers() }
         )
     );

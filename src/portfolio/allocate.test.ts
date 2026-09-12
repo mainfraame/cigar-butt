@@ -127,3 +127,46 @@ describe('allocate', () => {
     expect(plan.lines[0]?.shares).toBeCloseTo(30.003, 3);
   });
 });
+
+describe('undeployed cash diagnosis', () => {
+  const three = [
+    candidate('ASTE', 41.42),
+    candidate('HVT', 27.6),
+    candidate('NL', 7.01)
+  ];
+
+  it('blames the per-name cap when the cap is what binds', () => {
+    // 3 names at a 10% cap can hold 30% of the balance however it is
+    // weighted. Calling the other 70% "rounding" sends the reader hunting a
+    // sizing fault that is not there.
+    const plan = allocate({
+      availableCash: new Decimal(50_000),
+      candidates: three
+    });
+
+    const warning = plan.warnings.find(note => note.includes('undeployed'));
+    expect(warning).toContain('per-name cap');
+    expect(warning).toContain('10%');
+    expect(warning).not.toContain('whole-share rounding');
+  });
+
+  it('still blames rounding when the cap is not binding', () => {
+    const plan = allocate({
+      availableCash: new Decimal(50_000),
+      candidates: three,
+      maxPositionFraction: new Decimal(1)
+    });
+
+    const warning = plan.warnings.find(note => note.includes('undeployed'));
+    expect(warning).toBeUndefined();
+  });
+
+  it('names how much the cap allows in total', () => {
+    const plan = allocate({
+      availableCash: new Decimal(50_000),
+      candidates: three
+    });
+
+    expect(plan.warnings.join(' ')).toContain('$15,000.00');
+  });
+});

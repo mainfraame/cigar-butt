@@ -3,6 +3,7 @@ import { maxBy, sortBy } from 'lodash-es';
 import {
   companyConcept,
   CONCEPTS,
+  COVER_SHARES,
   type CompanyFact,
   latestFact
 } from '../data/sec.ts';
@@ -162,6 +163,34 @@ export async function fetchBalanceSheet(
     if (fallback) {
       sheet[key] = { ...fallback, stale: true };
       stale.push({ asOf: fallback.asOf, key });
+    }
+  }
+
+  // A filer that stopped tagging the us-gaap share count still puts one on
+  // every cover page. Only the cover of *this* filing will do: matching on the
+  // accession means the count is the filer's own statement alongside these
+  // exact figures, rather than a number from a neighbouring quarter. Its date
+  // is the cover date, which is days after the period end and is reported as
+  // its own — a share count is a divisor, not a line item to be summed, and
+  // the current count is the right divisor for a per-share figure.
+  if (!sheet['sharesOutstanding'] || sheet['sharesOutstanding'].stale) {
+    const anchor = ANCHOR_CONCEPTS.map(key => sheet[key]).find(
+      item => item !== undefined && !item.stale
+    );
+    if (anchor) {
+      const cover = latestFact(
+        (await companyConcept(cik, COVER_SHARES, 'dei')).filter(
+          fact => fact.accn === anchor.accn
+        )
+      );
+      if (cover) {
+        sheet['sharesOutstanding'] = toDated(cover);
+        // It is no longer missing, so drop any staleness already recorded.
+        const index = stale.findIndex(
+          entry => entry.key === 'sharesOutstanding'
+        );
+        if (index >= 0) stale.splice(index, 1);
+      }
     }
   }
 

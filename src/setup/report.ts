@@ -115,27 +115,13 @@ export function renderSetup(report: SetupReport = setupReport()): string {
     '### Quick reference — every sign-up link\n\n' +
       '| Provider | Needed | Register |\n|---|---|---|\n' +
       PROVIDERS.map(spec => {
+        // "Any one of" rather than a count: the pool has grown from three
+        // providers to eight, and a hard-coded number goes stale silently.
         const need =
           spec.requirement === 'required'
             ? '**Required**'
             : spec.requirement === 'one-of'
-              ? 'One of three'
-              : 'Optional';
-        return `| ${spec.label} | ${need} | ${spec.signupUrl} |`;
-      }).join('\n') +
-      '\n\nAll of these have a free tier. SEC EDGAR and FINRA need no ' +
-      'registration at all; FDIC BankFind is unauthenticated too.'
-  );
-
-  sections.push(
-    '### Quick reference — every sign-up link\n\n' +
-      '| Provider | Needed | Register |\n|---|---|---|\n' +
-      PROVIDERS.map(spec => {
-        const need =
-          spec.requirement === 'required'
-            ? '**Required**'
-            : spec.requirement === 'one-of'
-              ? 'One of three'
+              ? 'Any one of these'
               : 'Optional';
         return `| ${spec.label} | ${need} | ${spec.signupUrl} |`;
       }).join('\n') +

@@ -2,7 +2,13 @@ import type { McpServer } from '@modelcontextprotocol/server';
 
 import * as z from 'zod/v4';
 
-import { purge, stats, TTL, vacuumExpired } from '../cache/store.ts';
+import {
+  CACHE_NAMESPACES,
+  purge,
+  stats,
+  TTL,
+  vacuumExpired
+} from '../cache/store.ts';
 import { clearCooldowns } from '../data/pool.ts';
 import { quoteProviderStatus } from '../data/prices.ts';
 import { attempt, cell, text } from './shared.ts';
@@ -15,14 +21,6 @@ import { attempt, cell, text } from './shared.ts';
  * because a user who suspects a figure is stale needs a way to force a refetch
  * without editing environment variables and restarting the client.
  */
-
-const NAMESPACES = [
-  'quote',
-  'sec-concept',
-  'sec-frames',
-  'sec-submissions',
-  'sec-tickers'
-] as const;
 
 /** Compact duration for a table cell. */
 function humanise(seconds: number): string {
@@ -95,9 +93,12 @@ export function registerCacheTools(server: McpServer): void {
             'Remove only entries past their TTL. Safe to run any time.'
           ),
         source: z
-          .enum(NAMESPACES)
+          .enum(CACHE_NAMESPACES)
           .optional()
-          .describe('Clear one source. Omit to clear all of them.')
+          .describe(
+            'Clear one source. Omit to clear all of them. `cache_status` lists ' +
+              'what is actually held.'
+          )
       }),
       title: 'Clear the cache'
     },

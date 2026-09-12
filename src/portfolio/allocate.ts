@@ -136,6 +136,7 @@ export function allocate(input: AllocationInput): AllocationPlan {
     : investable;
 
   const lines: AllocationLine[] = [];
+  let capped = 0;
   for (const [index, candidate] of candidates.entries()) {
     const raw = rawWeights[index] ?? ZERO;
     // Multiply before dividing. Normalising the weight first rounds 1/3 to 34
@@ -143,6 +144,7 @@ export function allocate(input: AllocationInput): AllocationPlan {
     // budget into $9,999.99…9 and cost a whole share at $10.
     const uncapped = div(investable.times(raw), weightTotal) ?? ZERO;
     const targetValue = Decimal.min(uncapped, cap);
+    if (uncapped.gt(cap)) capped += 1;
     const weight = div(raw, weightTotal) ?? ZERO;
 
     if (!gtZero(candidate.price)) {
@@ -189,8 +191,22 @@ export function allocate(input: AllocationInput): AllocationPlan {
 
   const residual = availableCash.minus(deployed).minus(actualCommission);
   if (div(residual, availableCash)?.gt('0.05')) {
+    // Naming the wrong cause sends the reader hunting the wrong thing. With a
+    // 10% cap and three names, 70% of the balance is left by arithmetic that
+    // has nothing to do with rounding — the cap simply cannot deploy more than
+    // names × cap, and rounding accounts for tens of dollars of it at most.
+    const ceiling = cap.times(lines.length);
     warnings.push(
-      `${asUsd(residual)} (over 5% of the balance) is left undeployed after whole-share rounding.`
+      capped > 0 && gtZero(maxPositionFraction)
+        ? `${asUsd(residual)} (over 5% of the balance) is left undeployed. The ` +
+            `per-name cap of ${out(maxPositionFraction.times(100), 2) ?? 0}% binds ` +
+            `on ${capped} of ${lines.length} name(s), so at most ` +
+            `${asUsd(ceiling)} can be deployed across this list however it is ` +
+            'weighted. Add names, or raise `maxPositionFraction` — the cap ' +
+            'exists to stop one name dominating, and with few names it is the ' +
+            'diversification rule biting rather than a sizing fault.'
+        : `${asUsd(residual)} (over 5% of the balance) is left undeployed after ` +
+            'whole-share rounding.'
     );
   }
 

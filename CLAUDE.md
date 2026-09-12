@@ -47,9 +47,13 @@ pnpm 11+ reads its supply-chain settings from there rather than `.npmrc`.
   0600 JSON file) and the `SetupReport` shape.
 - `src/data/sec.ts` — EDGAR: `resolveTicker`, `companyConcept`, `latestFact`,
   `submissions`, `frame`, plus the `CONCEPTS` map of us-gaap tags the asset
-  tests read.
-- `src/data/prices.ts` — quotes, falling through Tiingo → Polygon → Alpha
-  Vantage. Every `Quote` carries `asOf`.
+  tests read. `companyConcept` takes a taxonomy: `dei` is needed for
+  `COVER_SHARES`, the cover-page share count, because filers stop tagging
+  `us-gaap:CommonStockSharesOutstanding` while still filing quarterly.
+- `src/data/prices.ts` — quotes from a failover pool of eight providers, in
+  order: Tiingo, Finnhub, Alpaca, Polygon, Twelve Data, Alpha Vantage, FMP,
+  EODHD. A request skips any provider that is unconfigured, cooling down, or
+  has spent its locally-counted budget. Every `Quote` carries `asOf`.
 - `src/analysis/metrics.ts` — `fetchBalanceSheet`, `computeMetrics`, `judge`,
   `isFinancial`. The asset tests.
 - `src/analysis/disqualifiers.ts` — `scanDisqualifiers` and

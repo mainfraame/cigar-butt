@@ -247,8 +247,14 @@ export function registerCongressTools(server: McpServer): void {
             `${state.reports.toLocaleString()} reports · ` +
             `${state.trades.toLocaleString()} transactions · ` +
             `${state.tickers.toLocaleString()} distinct tickers\n\n` +
-            `Filings indexed from **${state.oldestFiled ?? '—'}** to ` +
-            `**${state.newestFiled ?? '—'}**.\n\n` +
+            // "from — to —" reads as a rendering fault. An empty index is a
+            // state worth stating plainly, because the next thing the reader
+            // needs is the instruction, not a blank range.
+            (state.oldestFiled && state.newestFiled
+              ? `Filings indexed from **${state.oldestFiled}** to ` +
+                `**${state.newestFiled}**.\n\n`
+              : '**Nothing indexed yet.** A ticker search will find nothing ' +
+                'until this has run — pass `sinceDays` to start.\n\n') +
             (result
               ? `Indexed ${result.reportsIndexed} report(s) and ` +
                 `${result.tradesAdded} transaction(s) on this call. ` +
