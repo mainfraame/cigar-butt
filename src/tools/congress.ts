@@ -88,9 +88,14 @@ export function registerCongressTools(server: McpServer): void {
           .number()
           .int()
           .min(1)
-          .max(365)
+          .max(5000)
           .default(30)
-          .describe('Only reports filed within this many days.'),
+          .describe(
+            'Only reports filed within this many days. The archive reaches back ' +
+              'to 2012, so a long window is legitimate — but it returns the ' +
+              'NEWEST `reportLimit` reports in that window, not the oldest, so ' +
+              'narrow the window to walk backwards rather than raising the limit.'
+          ),
         ticker: z
           .string()
           .max(10)

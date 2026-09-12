@@ -21,6 +21,20 @@ import { fetchJson, fetchText } from '../http/client.ts';
  * supervises is the pattern worth looking at.
  */
 
+/**
+ * There is no bulk download and no export endpoint. Verified: the Senate Ethics
+ * Committee names efdsearch.senate.gov as *the* public database, and
+ * `/search/report/export/`, `/search/download/` and `/search/report/csv/` all
+ * 404. The DataTables JSON endpoint the search page calls is therefore the
+ * structured feed, and it reaches the full archive — 2,426 periodic transaction
+ * reports on record back to 2012.
+ *
+ * Every third-party mirror re-scrapes this same endpoint, adds an API key, and
+ * inserts itself between the filing and the reader. The free ones tested either
+ * require a key (Financial Modeling Prep, Finnhub, DisclosedCapitol), bot-block
+ * (CapitolTrades), or have gone stale (senate-stock-watcher's aggregate stops
+ * in 2019). So this reads the primary source directly.
+ */
 const SENATE_HOST = 'https://efdsearch.senate.gov';
 const SENATE_RATE = { rateKey: 'efdsearch.senate.gov', requestsPerSecond: 1 };
 const HOUSE_RATE = {
@@ -131,8 +145,11 @@ async function senateSession(): Promise<Map<string, string>> {
   const token = jar.get('csrftoken');
   if (!token) {
     throw new Error(
-      'Senate eFD did not issue a session token. The site may be down or may ' +
-        'have changed its search form.'
+      'Senate eFD did not issue a session token, so no query can be signed. ' +
+        'The site is the only public source for this data — there is no bulk ' +
+        'file and no export endpoint — so if this persists the search form has ' +
+        'changed and this module needs updating. Check ' +
+        'https://efdsearch.senate.gov/search/ in a browser first.'
     );
   }
 

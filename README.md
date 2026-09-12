@@ -205,6 +205,18 @@ is the part carrying real information. No credential needed.
 | `congress_member_profile` | A senator's committees, board seats and outside positions, plus every employer paying the household — self, spouse or child   |
 | `congress_house_filings`  | House transaction-report filings with PDF links. Filing records only: House disclosures are PDFs, many of them scanned images |
 
+**On sources.** There is no bulk download of Senate disclosures and no export
+endpoint — the Senate Ethics Committee names
+[efdsearch.senate.gov](https://efdsearch.senate.gov/search/) as _the_ public
+database, and `/search/report/export/`, `/search/download/` and
+`/search/report/csv/` all 404. Its search endpoint is therefore the structured
+feed, and it reaches the full archive: 2,426 periodic transaction reports back
+to 2012. Every third-party mirror re-scrapes that same endpoint and puts an API
+key in front of it; the ones tested either require a key (Financial Modeling
+Prep, Finnhub, DisclosedCapitol), bot-block (CapitolTrades), or have gone stale
+(senate-stock-watcher's aggregate stops in 2019). So this reads the primary
+source.
+
 ### Portfolio
 
 | Tool               | What it does                                                                      |
