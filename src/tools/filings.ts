@@ -6,6 +6,7 @@ import {
   extractItem,
   filingDocuments,
   filingText,
+  isHeadingOnly,
   parseFills
 } from '../data/filing-text.ts';
 import { resolveTicker, submissions } from '../data/sec.ts';
@@ -159,7 +160,11 @@ export function registerFilingTools(server: McpServer): void {
         const fills = parseFills(body);
 
         const scoped = item ? extractItem(body, item) : undefined;
-        const chosen = scoped ?? body;
+        const unamended =
+          item !== undefined &&
+          scoped !== undefined &&
+          isHeadingOnly(scoped, item);
+        const chosen = unamended ? body : (scoped ?? body);
         const truncated = chosen.length > maxChars;
 
         return text(
@@ -169,6 +174,13 @@ export function registerFilingTools(server: McpServer): void {
             `${event.reportDate ? `, reporting ${event.reportDate}` : ''}. ` +
             `Accession \`${event.accessionNumber}\`` +
             `${document ? `, file \`${document}\`` : ''}.\n\n` +
+            (unamended
+              ? `**Item ${item} is a heading with nothing under it.** An ` +
+                'amendment restates only the items it changes while the form ' +
+                'carries every heading regardless, so this filing is not where ' +
+                `Item ${item} was stated — read the original filing in the ` +
+                'series for that. The whole document follows.\n\n'
+              : '') +
             (item && scoped === undefined
               ? `Item ${item} is listed in the index but no heading for it was ` +
                 'found in the text, so the whole document follows. Filers ' +

@@ -75,6 +75,26 @@ export function extractItem(text: string, item: string): string | undefined {
 }
 
 /**
+ * Whether a section is a heading and nothing else.
+ *
+ * An amendment restates only the items it changes, but the form's headings
+ * are all present regardless — so Item 4 of a 13D/A that amends only the
+ * holdings comes back as the bare words "Item 4. Purpose of Transaction".
+ * Handing that to a reader asking what an activist wants implies they stated
+ * no purpose, when in fact this amendment simply is not where they stated it.
+ */
+export function isHeadingOnly(section: string, item: string): boolean {
+  const escaped = item.replaceAll('.', '\\.');
+  const body = section
+    .replace(new RegExp(`^Item\\s+${escaped}\\.?`, 'i'), '')
+    // Drop the item's title, which is fixed by the form rather than written
+    // by the filer: "Purpose of Transaction", "Interest in Securities".
+    .replace(/^[\s.:—-]*([A-Z][a-z]*\s+){0,6}[A-Za-z]*/, '')
+    .trim();
+  return body.length < 40;
+}
+
+/**
  * Fetches a filing's primary document as text.
  *
  * The document name comes from the submissions index rather than from listing

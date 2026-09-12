@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { extractItem, parseFills, plainText } from './filing-text.ts';
+import {
+  extractItem,
+  isHeadingOnly,
+  parseFills,
+  plainText
+} from './filing-text.ts';
 
 describe('plainText', () => {
   it('drops script and style bodies rather than reading them as prose', () => {
@@ -129,5 +134,28 @@ describe('extractItem on whole-number headings', () => {
     const eightK = 'Item 3.01 Compliance regained. Item 7.01 A press release.';
 
     expect(extractItem(eightK, '3.01')).toBe('Item 3.01 Compliance regained.');
+  });
+});
+
+describe('isHeadingOnly', () => {
+  it('detects an item an amendment did not restate', () => {
+    // A 13D/A amending only the holdings still carries every heading, so
+    // Item 4 comes back as the bare words — which reads as if the activist
+    // stated no purpose.
+    expect(isHeadingOnly('Item 4. Purpose of Transaction', '4')).toBe(true);
+  });
+
+  it('does not flag an item that actually says something', () => {
+    expect(
+      isHeadingOnly(
+        'Item 4. Purpose of Transaction The Reporting Persons intend to ' +
+          'engage with the board regarding capital allocation and costs.',
+        '4'
+      )
+    ).toBe(false);
+  });
+
+  it('handles an 8-K decimal heading with no body', () => {
+    expect(isHeadingOnly('Item 3.01', '3.01')).toBe(true);
   });
 });
