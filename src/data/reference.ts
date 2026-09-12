@@ -2,7 +2,7 @@ import { cached } from '../cache/store.ts';
 import { providerById } from '../config/providers.ts';
 import { requireCredential } from '../config/store.ts';
 import { fetchJson } from '../http/client.ts';
-import { dec, div } from '../math/decimal.ts';
+import { dec, div, type Decimal } from '../math/decimal.ts';
 
 /**
  * Polygon reference data: listing status and corporate actions.
@@ -233,4 +233,77 @@ export async function dividends(
       return rows;
     }
   );
+}
+
+/** A whole-market close, keyed by ticker. */
+export interface MarketCloses {
+  readonly asOf: string;
+  readonly closes: ReadonlyMap<string, Decimal>;
+}
+
+interface GroupedResponse {
+  queryCount?: number;
+  results?: { c?: number; T?: string }[];
+  resultsCount?: number;
+  status?: string;
+}
+
+/**
+ * Every US equity's close for one session, in a single request.
+ *
+ * This is what makes a market-wide *price* screen affordable. Quoting five
+ * thousand filers one at a time is impossible on any free tier — Tiingo
+ * allows fifty symbols an hour — so without this the screen can only rank
+ * balance-sheet shape, which structurally surfaces companies whose balance
+ * sheet is nothing but cash and buries the profitable business trading below
+ * its tangible book. That is the opposite of what Schloss bought.
+ *
+ * The date is the session the data belongs to, returned alongside, because a
+ * close is meaningless without knowing which day's it is. Polygon serves the
+ * previous session on a free plan and returns an empty set on a weekend or
+ * holiday rather than the last trading day, so the caller walks back.
+ */
+export async function marketCloses(date: string): Promise<MarketCloses> {
+  const key = polygonKey();
+
+  const data = await cached('polygon-grouped', date, TTL_REFERENCE, () =>
+    fetchJson<GroupedResponse>(
+      `https://api.polygon.io/v2/aggs/grouped/locale/us/market/stocks/${date}`,
+      {
+        ...POLYGON_RATE,
+        headers: authorization(key),
+        searchParams: { adjusted: 'true' }
+      }
+    )
+  );
+
+  const closes = new Map<string, Decimal>();
+  for (const row of data.results ?? []) {
+    const close = dec(row.c);
+    if (!row.T || !close) continue;
+    closes.set(row.T.toUpperCase(), close);
+  }
+
+  return { asOf: date, closes };
+}
+
+/**
+ * The most recent session with data, walking back from `from`.
+ *
+ * Weekends, holidays and the lag on a free plan all return an empty set, and
+ * an empty set is indistinguishable from "the market was shut" — so it walks
+ * rather than guessing a calendar.
+ */
+export async function latestMarketCloses(
+  from: Date = new Date(),
+  maxDaysBack = 6
+): Promise<MarketCloses | undefined> {
+  for (let back = 1; back <= maxDaysBack; back += 1) {
+    const date = new Date(from.getTime() - back * 86_400_000)
+      .toISOString()
+      .slice(0, 10);
+    const result = await marketCloses(date);
+    if (result.closes.size > 0) return result;
+  }
+  return undefined;
 }

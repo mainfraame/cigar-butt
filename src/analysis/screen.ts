@@ -1,6 +1,7 @@
 import { keyBy, sortBy } from 'lodash-es';
 
-import { CONCEPTS, frame, type FrameEntry } from '../data/sec.ts';
+import { latestMarketCloses } from '../data/reference.ts';
+import { CONCEPTS, frame, tickersByCik, type FrameEntry } from '../data/sec.ts';
 import { type Decimal, dec, div, gtZero, ZERO } from '../math/decimal.ts';
 
 /**
@@ -41,24 +42,44 @@ export interface ScreenRow {
   readonly goodwill: Decimal;
   readonly intangibles: Decimal;
   readonly liabilities?: Decimal;
+  /** Only present when a price join was requested and succeeded. */
+  readonly marketCap?: Decimal;
   readonly ncav?: Decimal;
   /** NCAV as a fraction of tangible book — how asset-light the balance sheet is. */
   readonly ncavToTangibleBook?: Decimal;
   readonly periodEnd: string;
+  readonly priceToNcav?: Decimal;
+  /** Price over tangible book. Schloss's actual filter. */
+  readonly priceToTangibleBook?: Decimal;
+  readonly sharesOutstanding?: Decimal;
   readonly stockholdersEquity?: Decimal;
   readonly tangibleBook?: Decimal;
+  readonly ticker?: string;
 }
 
 export interface ScreenOptions {
+  /** Cap on price-to-tangible-book when prices are joined. */
+  readonly maxPriceToBook?: Decimal;
   /** Require NCAV to be at least this fraction of tangible book. */
   readonly minNcavRatio?: Decimal;
   /** Drop filers whose tangible book is below this, in dollars. */
   readonly minTangibleBook?: Decimal;
   /** e.g. `CY2026Q1I`. The trailing `I` marks an instantaneous frame. */
   readonly period: string;
+  /**
+   * Join a whole-market price and rank by price-to-tangible-book.
+   *
+   * Without it the screen can only rank balance-sheet *shape* — NCAV as a
+   * share of tangible book — which structurally puts companies whose balance
+   * sheet is nothing but cash at the top and buries the profitable business
+   * trading below its book. That is the opposite of what Schloss bought, and
+   * it is why every candidate off this screen was a clinical-stage biotech.
+   */
+  readonly withPrices?: boolean;
 }
 
 const CONCEPT_ORDER = [
+  CONCEPTS.sharesOutstanding,
   CONCEPTS.stockholdersEquity,
   CONCEPTS.assetsCurrent,
   CONCEPTS.liabilities,
@@ -83,19 +104,32 @@ function index(entries: readonly FrameEntry[]): Map<number, FrameEntry> {
  * wants. Equity, current assets and liabilities are not defaulted — those are
  * load-bearing and their absence is a real gap.
  */
-export async function screenMarket(
-  options: ScreenOptions
-): Promise<{ rows: ScreenRow[]; universeSize: number }> {
-  const [equity, currentAssets, liabilities, goodwill, intangibles] =
-    await Promise.all(
-      CONCEPT_ORDER.map(concept => frame(concept, options.period))
-    );
+export async function screenMarket(options: ScreenOptions): Promise<{
+  priceAsOf?: string;
+  priced: number;
+  rows: ScreenRow[];
+  universeSize: number;
+}> {
+  const [
+    sharesOutstanding,
+    equity,
+    currentAssets,
+    liabilities,
+    goodwill,
+    intangibles
+  ] = await Promise.all(
+    CONCEPT_ORDER.map((concept, position) =>
+      // The share count is a count, not an amount of money.
+      frame(concept, options.period, position === 0 ? 'shares' : 'USD')
+    )
+  );
 
   const byEquity = index(equity ?? []);
   const byCurrentAssets = index(currentAssets ?? []);
   const byLiabilities = index(liabilities ?? []);
   const byGoodwill = index(goodwill ?? []);
   const byIntangibles = index(intangibles ?? []);
+  const bySharesOutstanding = index(sharesOutstanding ?? []);
 
   const rows: ScreenRow[] = [];
 
@@ -135,7 +169,56 @@ export async function screenMarket(
 
   const universeSize = rows.length;
 
+  // One request for every close in the market, and one already-cached index
+  // to join CIK to ticker. Quoting five thousand filers individually is
+  // impossible on any free tier, which is why the screen was priceless until
+  // now.
+  let priceAsOf: string | undefined;
+  let priced = 0;
+  if (options.withPrices) {
+    const [market, byCik] = await Promise.all([
+      latestMarketCloses(),
+      tickersByCik()
+    ]);
+
+    if (market) {
+      priceAsOf = market.asOf;
+      for (const [position, row] of rows.entries()) {
+        const entry = byCik.get(row.cik);
+        const close = entry
+          ? market.closes.get(entry.ticker.toUpperCase())
+          : undefined;
+        const shares = dec(bySharesOutstanding.get(row.cik)?.val);
+        if (!entry || !close || !gtZero(shares)) continue;
+
+        const marketCap = close.times(shares);
+        priced += 1;
+        rows[position] = {
+          ...row,
+          marketCap,
+          priceToNcav: gtZero(row.ncav) ? div(marketCap, row.ncav) : undefined,
+          priceToTangibleBook: gtZero(row.tangibleBook)
+            ? div(marketCap, row.tangibleBook)
+            : undefined,
+          sharesOutstanding: shares,
+          ticker: entry.ticker
+        };
+      }
+    }
+  }
+
   const filtered = rows.filter(row => {
+    if (options.withPrices) {
+      // A row with no price cannot be ranked by cheapness, and keeping it
+      // would put unpriced names above priced ones in a price-ranked list.
+      if (!row.priceToTangibleBook) return false;
+      if (
+        options.maxPriceToBook &&
+        row.priceToTangibleBook.gt(options.maxPriceToBook)
+      ) {
+        return false;
+      }
+    }
     if (!gtZero(row.tangibleBook)) return false;
     if (
       options.minTangibleBook &&
@@ -159,9 +242,16 @@ export async function screenMarket(
   // worth looking at — but their ratio is not a measurement, so letting it
   // outrank a measured one would put an artifact at the top of the page.
   return {
+    priceAsOf,
+    priced,
     rows: sortBy(filtered, [
       row => (row.basisInconsistent ? 1 : 0),
-      row => -(row.ncavToTangibleBook?.toNumber() ?? 0)
+      // Cheapest first when priced; otherwise the most cash-like balance
+      // sheet, which is all an unpriced screen can honestly rank on.
+      row =>
+        options.withPrices
+          ? (row.priceToTangibleBook?.toNumber() ?? Number.POSITIVE_INFINITY)
+          : -(row.ncavToTangibleBook?.toNumber() ?? 0)
     ]),
     universeSize
   };

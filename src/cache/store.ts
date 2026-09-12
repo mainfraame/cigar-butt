@@ -67,6 +67,7 @@ export const CACHE_NAMESPACES = [
   'fred',
   'fx',
   'polygon-dividends',
+  'polygon-grouped',
   'polygon-splits',
   'polygon-ticker',
   'quote',

@@ -126,20 +126,42 @@ function padCik(cik: number | string): string {
 let tickerMap: Map<string, TickerEntry> | undefined;
 
 /** Ticker → CIK. One ~1MB fetch, cached for the life of the process. */
-export async function resolveTicker(ticker: string): Promise<TickerEntry> {
-  if (!tickerMap) {
-    const data = await cached('sec-tickers', 'all', TTL.tickerIndex, () =>
-      fetchJson<Record<string, TickerEntry>>(
-        'https://www.sec.gov/files/company_tickers.json',
-        { ...SEC_RATE, headers: headers() }
-      )
-    );
-    tickerMap = new Map(
-      Object.values(data).map(entry => [entry.ticker.toUpperCase(), entry])
-    );
+/**
+ * Every filer that has a ticker, keyed by CIK.
+ *
+ * The screen works in CIKs because XBRL frames do, and a price works in
+ * tickers. Without this join a market-wide screen can report a company's
+ * balance sheet and never what it costs.
+ */
+export async function tickersByCik(): Promise<Map<number, TickerEntry>> {
+  await resolveTickerIndex();
+  const byCik = new Map<number, TickerEntry>();
+  for (const entry of tickerMap?.values() ?? []) {
+    // The index lists several tickers for a dual-class filer. First wins,
+    // which is the ordinary share often enough, and the screen says the
+    // figure is a vendor join rather than a filing.
+    if (!byCik.has(entry.cik_str)) byCik.set(entry.cik_str, entry);
   }
+  return byCik;
+}
 
-  const entry = tickerMap.get(ticker.trim().toUpperCase());
+async function resolveTickerIndex(): Promise<void> {
+  if (tickerMap) return;
+  const data = await cached('sec-tickers', 'all', TTL.tickerIndex, () =>
+    fetchJson<Record<string, TickerEntry>>(
+      'https://www.sec.gov/files/company_tickers.json',
+      { ...SEC_RATE, headers: headers() }
+    )
+  );
+  tickerMap = new Map(
+    Object.values(data).map(entry => [entry.ticker.toUpperCase(), entry])
+  );
+}
+
+export async function resolveTicker(ticker: string): Promise<TickerEntry> {
+  await resolveTickerIndex();
+
+  const entry = tickerMap?.get(ticker.trim().toUpperCase());
   if (!entry) {
     throw new Error(
       `${ticker} is not in SEC's ticker index. It may be a non-US listing, a ` +

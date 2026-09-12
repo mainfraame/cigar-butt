@@ -86,6 +86,20 @@ pnpm 11+ reads its supply-chain settings from there rather than `.npmrc`.
   attaches **no price** — frames give the balance sheet, and pairing a stale
   quote with a filing figure is the mistake this codebase exists to avoid. Its
   output is a candidate list for `analyze_ticker`, not a verdict.
+
+  `withPrices` changes what it can rank on, and the distinction matters more
+  than it sounds. Unpriced, the only ordering available is NCAV over tangible
+  book — balance-sheet _shape_ — which puts a company whose balance sheet is
+  nothing but cash at the top by construction, and buries the profitable
+  business trading under its book. Every candidate off the unpriced screen was
+  a clinical-stage biotech for exactly that reason. With prices it ranks by
+  price over tangible book, which is Schloss's actual filter, using
+  `latestMarketCloses` — one Polygon request for every US close, because
+  quoting five thousand filers individually is impossible on any free tier.
+  The join is CIK → ticker via `tickersByCik`, and a filer it misses is
+  dropped rather than shown unpriced, so an unpriceable name cannot outrank a
+  priced one.
+
 - `src/portfolio/allocate.ts` — equal-weight whole-share sizing against a cash
   balance.
 - `src/portfolio/rebalance.ts` — target weights vs. current holdings → buys,

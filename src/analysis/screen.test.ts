@@ -61,6 +61,33 @@ beforeEach(() => {
   frames.clear();
 });
 
+describe('price-ranked screen', () => {
+  it('ranks by balance-sheet shape when no price is joined', async () => {
+    // All an unpriced screen can honestly rank on — and the reason every
+    // candidate off it was a company whose balance sheet is only cash.
+    load(
+      {
+        assetsCurrent: 300,
+        cik: 1,
+        liabilities: 110,
+        name: 'Cash Shell',
+        stockholdersEquity: 200
+      },
+      {
+        assetsCurrent: 150,
+        cik: 2,
+        liabilities: 110,
+        name: 'Operating Co',
+        stockholdersEquity: 400
+      }
+    );
+
+    const { rows } = await screen();
+
+    expect(rows[0]?.entityName).toBe('Cash Shell');
+  });
+});
+
 describe('inconsistent basis', () => {
   it('flags a row whose NCAV exceeds tangible book', async () => {
     // Impossible on one balance sheet: NCAV is equity less non-current

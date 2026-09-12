@@ -402,6 +402,14 @@ export function registerPortfolioTools(server: McpServer): void {
         'survivors to get a dated price and a verdict.',
       inputSchema: z.object({
         limit: z.number().int().min(1).max(200).default(50),
+        maxPriceToBook: z
+          .number()
+          .positive()
+          .optional()
+          .describe(
+            'Cap on price over tangible book. Requires `withPrices`. Schloss ' +
+              'wanted 0.6–0.8; 1.0 is the outer edge of the method.'
+          ),
         minNcavRatio: z
           .number()
           .min(0)
@@ -428,28 +436,51 @@ export function registerPortfolioTools(server: McpServer): void {
           .describe(
             'Reporting period, e.g. CY2026Q1I. Balance-sheet concepts need the ' +
               'trailing I. Use a quarter old enough that most filers have reported.'
+          ),
+        withPrices: z
+          .boolean()
+          .default(false)
+          .describe(
+            'Join a whole-market close and rank by price over tangible book — ' +
+              "Schloss's actual filter. One extra request buys every US close. " +
+              'Without it the screen can only rank balance-sheet shape, which ' +
+              'puts pure-cash balance sheets on top and buries the profitable ' +
+              'business trading under its book.'
           )
       }),
       title: 'Screen the whole market'
     },
-    ({ limit, minNcavRatio, minTangibleBook, period }) =>
+    ({
+      limit,
+      maxPriceToBook,
+      minNcavRatio,
+      minTangibleBook,
+      period,
+      withPrices
+    }) =>
       attempt(async () => {
         const blocked = requireCapabilities('sec');
         if (blocked) return blocked;
 
-        const { rows, universeSize } = await screenMarket({
+        const { priceAsOf, priced, rows, universeSize } = await screenMarket({
+          maxPriceToBook: dec(maxPriceToBook),
           minNcavRatio: dec(minNcavRatio),
           minTangibleBook: dec(minTangibleBook),
-          period
+          period,
+          withPrices
         });
 
         const shown = rows.slice(0, limit);
         const table = shown
-          .map(
-            row =>
-              `| ${row.entityName} | ${row.cik} | ${usd(out(row.tangibleBook, 0))} | ` +
-              `${usd(out(row.ncav, 0))} | ${pct(out(row.ncavToTangibleBook))}` +
-              `${row.basisInconsistent ? ' ⚠' : ''} | ${row.periodEnd} |`
+          .map(row =>
+            withPrices
+              ? `| ${row.ticker ?? '—'} | ${row.entityName} | ` +
+                `${usd(out(row.marketCap, 0))} | ${usd(out(row.tangibleBook, 0))} | ` +
+                `**${out(row.priceToTangibleBook, 2)}** | ` +
+                `${cell(out(row.priceToNcav, 2))} | ${row.periodEnd} |`
+              : `| ${row.entityName} | ${row.cik} | ${usd(out(row.tangibleBook, 0))} | ` +
+                `${usd(out(row.ncav, 0))} | ${pct(out(row.ncavToTangibleBook))}` +
+                `${row.basisInconsistent ? ' ⚠' : ''} | ${row.periodEnd} |`
           )
           .join('\n');
 
@@ -457,10 +488,29 @@ export function registerPortfolioTools(server: McpServer): void {
           `## Market screen — ${period}\n\n` +
             `${universeSize} filers reported \`StockholdersEquity\` for this period; ` +
             `${rows.length} cleared the filters; showing ${shown.length}.\n\n` +
-            `| Company | CIK | Tangible book | NCAV | NCAV/TBV | Period end |\n|---|---|---|---|---|---|\n${table}\n\n` +
-            '**These are candidates, not results.** No price is attached, so nothing ' +
-            'here says a name is cheap — only that its balance sheet is the right ' +
-            'shape. Run `check_disqualifiers` and then `analyze_ticker` on each name ' +
+            (withPrices
+              ? `| Ticker | Company | Market cap | Tangible book | P/TBV | P/NCAV | Period end |\n|---|---|---|---|---|---|---|\n${table}\n\n`
+              : `| Company | CIK | Tangible book | NCAV | NCAV/TBV | Period end |\n|---|---|---|---|---|---|\n${table}\n\n`) +
+            (withPrices
+              ? `Prices are the closes for **${priceAsOf ?? 'an unknown session'}**, ` +
+                `joined to ${priced.toLocaleString('en-US')} of the ${universeSize.toLocaleString('en-US')} ` +
+                'filers by ticker. A filer the join missed — no ticker in the SEC ' +
+                'index, a share count it never tagged, or no trade that session — ' +
+                'is absent from this list rather than shown unpriced. Ranked ' +
+                'cheapest first by price over tangible book.\n\n' +
+                '**Market cap here is a vendor join, not a filing.** The share ' +
+                'count comes from XBRL and the price from a quote, and for an ADR ' +
+                'those are different units — `analyze_ticker` cross-checks each ' +
+                'name and will say so.\n\n'
+              : '') +
+            '**These are candidates, not results.** ' +
+            (withPrices
+              ? 'A price alone does not make a name cheap: the balance sheet may ' +
+                'be about to be consumed, and the filing index may already say ' +
+                'the name is dead. '
+              : 'No price is attached, so nothing here says a name is cheap — ' +
+                'only that its balance sheet is the right shape. ') +
+            'Run `check_disqualifiers` and then `analyze_ticker` on each name ' +
             'before it goes anywhere near a portfolio.\n\n' +
             (shown.some(row => row.basisInconsistent)
               ? '⚠ **A ratio above 100% is not a measurement.** NCAV cannot exceed ' +
