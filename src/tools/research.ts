@@ -12,14 +12,16 @@ import {
   judge,
   lastFiled
 } from '../analysis/metrics.ts';
+import { checkShareCounts } from '../analysis/shares.ts';
 import { quotes } from '../data/prices.ts';
+import { tickerReference } from '../data/reference.ts';
 import { resolveTicker, submissions } from '../data/sec.ts';
 import {
   configuredJurisdictions,
   filingsAdapter,
   guessJurisdiction
 } from '../filings/registry.ts';
-import { dec, out } from '../math/decimal.ts';
+import { dec, out, type Decimal } from '../math/decimal.ts';
 import {
   attempt,
   cell,
@@ -34,6 +36,21 @@ const tickerArg = z
   .min(1)
   .max(10)
   .describe('US-listed ticker symbol, e.g. "AAPL". Case-insensitive.');
+
+/**
+ * The vendor's share count, or nothing.
+ *
+ * Best effort by design: the cross-check is worth a request when Polygon
+ * answers and is not worth failing an analysis over when it does not.
+ */
+async function attemptShares(ticker: string): Promise<Decimal | undefined> {
+  try {
+    const reference = await tickerReference(ticker);
+    return dec(reference.sharesOutstanding);
+  } catch {
+    return undefined;
+  }
+}
 
 export function registerResearchTools(server: McpServer): void {
   server.registerTool(
@@ -188,6 +205,19 @@ export function registerResearchTools(server: McpServer): void {
         const { failed, quotes: found } = await quotes([entry.ticker]);
         const price = found[0];
 
+        // Cross-check the share count against what actually trades. The two
+        // agree for most US filers and disagree by the bundling ratio for an
+        // ADR, which silently multiplies every per-share figure. Best effort:
+        // a missing or rate-limited vendor is a gap in the cross-check, not a
+        // reason to fail the analysis.
+        const vendorShares = await attemptShares(entry.ticker);
+        const shareCheck = checkShareCounts(
+          sheet.sharesOutstanding?.stale === true
+            ? undefined
+            : sheet.sharesOutstanding?.value,
+          vendorShares
+        );
+
         const priceDecimal = price ? dec(price.price) : undefined;
         const verdict = priceDecimal
           ? judge(metrics, priceDecimal, { financial })
@@ -200,6 +230,44 @@ export function registerResearchTools(server: McpServer): void {
                 `| ${check.name} | ${check.pass === undefined ? 'n/a' : check.pass ? 'pass' : 'FAIL'} | ${check.detail} |`
             )
             .join('\n') ?? '';
+
+        const shareWarning = (() => {
+          if (!shareCheck.inconsistent) return '';
+
+          const filed = out(sheet.sharesOutstanding?.value, 0)?.toLocaleString(
+            'en-US'
+          );
+          const traded = out(vendorShares, 0)?.toLocaleString('en-US');
+
+          // A whole-number ratio and a drifting one are different faults and
+          // want different answers. Calling dilution a unit mismatch sends the
+          // reader to the cover page; calling a unit mismatch dilution leaves
+          // a figure wrong by twentyfold on the page.
+          if (shareCheck.impliedUnit !== undefined) {
+            return (
+              '\n\n> **Every per-share figure above is wrong by a factor.** The ' +
+              `filing reports ${filed} shares and ${traded} actually trade — a ` +
+              `**${shareCheck.impliedUnit}:1 bundling ratio**. That is the ` +
+              'signature of an ADR, where the filing counts ordinary shares ' +
+              'while the price is quoted per depositary share, or of a split ' +
+              'the filing predates. Divide P/TBV and price-to-NCAV above by ' +
+              `${shareCheck.impliedUnit} to get the real figures, and confirm ` +
+              'against the cover page before acting on either.\n'
+            );
+          }
+
+          const diluting = shareCheck.ratio?.lt(1) === true;
+          return (
+            '\n\n> **The share count has moved since the balance sheet.** The ' +
+            `filing reports ${filed} shares and ${traded} trade today` +
+            `${diluting ? ', so the company has issued stock since' : ', so the company has bought stock back since'}` +
+            `. Per-share figures above use the filing's count and are therefore ` +
+            `${diluting ? 'overstated' : 'understated'} — on the current count they ` +
+            `are about ${out(shareCheck.ratio, 3)}× what is shown. For a ` +
+            'company funding itself by issuing shares this is not a rounding ' +
+            'detail: it is the discount being consumed while you read.\n'
+          );
+        })();
 
         const provenance = sortBy(
           Object.entries(sheet).filter(
@@ -244,7 +312,7 @@ export function registerResearchTools(server: McpServer): void {
             `| P/TBV | ${cell(out(verdict?.priceToTangibleBook, 3))} |\n` +
             `| Price / NCAV | ${cell(out(verdict?.priceToNcav, 3))} |\n\n` +
             (price
-              ? `Price ${usd(price.price)} as of **${price.asOf}** (${price.source}).\n\n`
+              ? `Price ${usd(price.price)} as of **${price.asOf}** (${price.source}).${shareWarning}\n\n`
               : `**No price retrieved.** ${failed[0]?.reason ?? ''}\n\n`) +
             (stale.length > 0
               ? `**Stale line items, excluded from the maths.** The filer stopped ` +

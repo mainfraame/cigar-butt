@@ -56,6 +56,16 @@ pnpm 11+ reads its supply-chain settings from there rather than `.npmrc`.
   has spent its locally-counted budget. Every `Quote` carries `asOf`.
 - `src/analysis/metrics.ts` — `fetchBalanceSheet`, `computeMetrics`, `judge`,
   `isFinancial`. The asset tests.
+- `src/analysis/shares.ts` — `checkShareCounts`, the cross-check between the
+  filing's share count and the vendor's. A price is quoted per _traded unit_,
+  which for an ADR is not what the filing counts: Amarin's 10-Q reports
+  420,044,022 ordinary shares while 21,122,834 ADSs trade, so P/TBV came out
+  at 13.07 on a company trading at 0.66x book. A whole-number ratio means a
+  bundling ratio or an unadjusted split and the figures are wrong by a factor;
+  a drifting ratio means the count moved since the balance sheet, and for a
+  filer funding itself with stock that dilution is the thesis eroding. The two
+  are reported differently on purpose. It never picks a winner — the filing is
+  authoritative about the company, the vendor about what trades.
 - `src/analysis/disqualifiers.ts` — `scanDisqualifiers` and
   `insiderFilingActivity`, both reading the filing index only.
 - `src/analysis/screen.ts` — the market-wide screen, built from SEC `frames`:
