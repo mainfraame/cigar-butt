@@ -92,13 +92,27 @@ export function registerFilingTools(server: McpServer): void {
         const cik = String(company.cik_str);
         const { events } = await submissions(cik);
 
+        const byForm = events.filter(
+          event => event.form.toUpperCase() === form.toUpperCase()
+        );
+
+        // `item` narrows the search only where the index actually carries an
+        // items array, which is an 8-K concept. A 13D numbers its sections
+        // Item 1 to Item 7 and reports none of them in the index, so treating
+        // the filter as mandatory found nothing — while the request was
+        // perfectly sensible, because Item 4 is where an activist says what
+        // it wants. Where the filter matches nothing, it still scopes the
+        // text of the filing the form alone selected.
+        const byItem =
+          item === undefined
+            ? byForm
+            : byForm.filter(event => event.items.includes(item));
+
         const matches = accession
           ? events.filter(event => event.accessionNumber === accession)
-          : events.filter(
-              event =>
-                event.form.toUpperCase() === form.toUpperCase() &&
-                (item === undefined || event.items.includes(item))
-            );
+          : byItem.length > 0
+            ? byItem
+            : byForm;
 
         const event = matches[0];
         if (!event) {
