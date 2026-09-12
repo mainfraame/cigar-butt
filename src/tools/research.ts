@@ -341,6 +341,11 @@ export function registerResearchTools(server: McpServer): void {
                     'assets shrink by roughly that burn every year, so a ' +
                     'discount to them is a wasting one, and the question is ' +
                     'whether it closes before the assets do.\n\n')) +
+            (burn.burnPeriod
+              ? `Annualised from the ${burn.burnPeriod.months ?? '?'}-month period ` +
+                `${burn.burnPeriod.from ?? '?'} to ${burn.burnPeriod.asOf}, ` +
+                `${usd(out(burn.burnPeriod.value, 0))} as filed. `
+              : '') +
             'Cash flow is from the statement, not derived from earnings. ' +
             'Annualising an interim period assumes the rest of the year looks ' +
             'like it has so far, which is an assumption, not a forecast.\n\n'

@@ -169,3 +169,47 @@ describe('working-capital cover', () => {
     expect(profile.workingCapitalYears).toBeUndefined();
   });
 });
+
+describe('anomalous periods', () => {
+  it('ignores a stub period shorter than a quarter', async () => {
+    // MagnaChip: annual cash flow of -$24.2M, and a short stub that
+    // annualised to "$5,892 a year" and from there to a runway of fourteen
+    // thousand years. A number that wrong reads as a company with no problem.
+    facts.set(FLOW, [
+      fact('2025-01-01', '2025-12-31', -24_208_000),
+      fact('2026-06-01', '2026-06-30', -491, '10-Q')
+    ]);
+
+    const profile = await burnProfile(
+      '1325702',
+      dec(87_936_000),
+      dec(164_473_000)
+    );
+
+    expect(profile.currentBurn?.toFixed(0)).toBe('-24208000');
+    expect(profile.burnPeriod?.months).toBe(12);
+  });
+
+  it('reports no runway when the burn rounds to nothing', async () => {
+    // Half a century of runway is arithmetic, not a fact about the company.
+    facts.set(FLOW, [fact('2026-01-01', '2026-06-30', -100, '10-Q')]);
+
+    const profile = await burnProfile('1', dec(87_936_000), dec(90_000_000));
+
+    expect(profile.selfFunding).toBe(false);
+    expect(profile.runwayYears).toBeUndefined();
+  });
+
+  it('names the period the burn was annualised from', async () => {
+    facts.set(FLOW, [fact('2026-01-01', '2026-06-30', -23_500_000, '10-Q')]);
+
+    const profile = await burnProfile(
+      '34956',
+      dec(118_000_000),
+      dec(121_663_000)
+    );
+
+    expect(profile.burnPeriod?.from).toBe('2026-01-01');
+    expect(profile.burnPeriod?.months).toBe(6);
+  });
+});

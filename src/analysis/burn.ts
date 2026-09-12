@@ -39,9 +39,14 @@ export interface Period {
   readonly value: Decimal;
 }
 
+/** Beyond this a runway is not a finding, it is a rounding artifact. */
+const IMPLAUSIBLE_RUNWAY_YEARS = 50;
+
 export interface BurnProfile {
   /** Latest annual operating cash flow, and the one before it. */
   readonly annualCashFlow: readonly Period[];
+  /** The period `currentBurn` was annualised from, so the reader can check it. */
+  readonly burnPeriod: Period | undefined;
   /**
    * Cash as a share of current assets.
    *
@@ -134,10 +139,18 @@ export async function burnProfile(
     .slice(-2)
     .toReversed();
 
-  // The newest period of any length, which on a quarterly filer is the
-  // year-to-date figure inside the latest 10-Q.
+  // The newest period of at least a quarter, which on a quarterly filer is
+  // the year-to-date figure inside the latest 10-Q.
+  //
+  // The length floor is load-bearing. Filers tag odd short stubs — a month, a
+  // transition period, a subsidiary figure — and annualising one produced
+  // "$5,892 a year" for MagnaChip against annual cash flow of -$24.2M, and
+  // from that a runway of fourteen thousand years. A number that wrong is
+  // worse than no number, because it reads as a company with no problem.
   const latest = sortBy(
-    flows.map(toPeriod).filter((p): p is Period => p !== undefined),
+    flows
+      .map(toPeriod)
+      .filter((p): p is Period => p !== undefined && (p.months ?? 0) >= 3),
     period => [period.asOf, period.months ?? 0]
   ).at(-1);
 
@@ -158,8 +171,14 @@ export async function burnProfile(
   // two numbers that happen to divide.
   const isCashBox = cashShare !== undefined && cashShare.gte('0.5');
 
+  const runway =
+    isCashBox && annualised?.isNegative() === true && gtZero(cash)
+      ? div(cash, annualised.abs())
+      : undefined;
+
   return {
     annualCashFlow: annual,
+    burnPeriod: latest,
     cashShare,
     currentBurn: annualised,
     revenue: sortBy(
@@ -172,13 +191,11 @@ export async function burnProfile(
       .filter((period): period is Period => period !== undefined)
       .slice(-2)
       .toReversed(),
+    // A runway past half a century is arithmetic, not a fact about the
+    // company: it means the burn is close enough to zero that dividing by it
+    // says nothing. Undefined reads as "no countdown", which is the truth.
     runwayYears:
-      isCashBox &&
-      annualised !== undefined &&
-      annualised.isNegative() &&
-      gtZero(cash)
-        ? div(cash, annualised.abs())
-        : undefined,
+      runway && runway.lt(IMPLAUSIBLE_RUNWAY_YEARS) ? runway : undefined,
     selfFunding,
     workingCapitalYears:
       !isCashBox &&
