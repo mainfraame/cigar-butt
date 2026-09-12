@@ -14,15 +14,15 @@
     "value-investing",
     "xbrl"
   ],
-  "homepage": "https://github.com/daynementier/cigar-butt#readme",
+  "homepage": "https://github.com/mainfraame/cigar-butt#readme",
   "bugs": {
-    "url": "https://github.com/daynementier/cigar-butt/issues"
+    "url": "https://github.com/mainfraame/cigar-butt/issues"
   },
   "license": "Apache-2.0",
   "author": "Dayne Mentier",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/daynementier/cigar-butt.git"
+    "url": "git+https://github.com/mainfraame/cigar-butt.git"
   },
   "bin": {
     "cigar-butt": "./dist/index.js"

@@ -72,7 +72,7 @@ use and store them itself. See below.
 ### From source
 
 ```bash
-git clone https://github.com/daynementier/cigar-butt.git
+git clone https://github.com/mainfraame/cigar-butt.git
 cd cigar-butt
 pnpm install
 pnpm build
