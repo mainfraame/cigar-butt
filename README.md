@@ -215,7 +215,9 @@ to 2012. Every third-party mirror re-scrapes that same endpoint and puts an API
 key in front of it; the ones tested either require a key (Financial Modeling
 Prep, Finnhub, DisclosedCapitol), bot-block (CapitolTrades), or have gone stale
 (senate-stock-watcher's aggregate stops in 2019). So this reads the primary
-source.
+source, parsed structurally with `node-html-parser` — each part of a report
+lives in its own `section.card`, so an empty part reads as empty instead of
+adopting the next one's table.
 
 ### Portfolio
 

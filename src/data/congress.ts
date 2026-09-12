@@ -1,4 +1,5 @@
 import { sortBy } from 'lodash-es';
+import { parse as parseHtml, type HTMLElement } from 'node-html-parser';
 
 import { cached } from '../cache/store.ts';
 import { fetchJson, fetchText } from '../http/client.ts';
@@ -168,18 +169,18 @@ interface SenateSearchResponse {
   recordsTotal?: number;
 }
 
-/** Strips tags and collapses the whitespace the eFD templates leave behind. */
-function plain(html: string): string {
-  return html
-    .replaceAll(/<[^>]+>/g, ' ')
-    .replaceAll('&amp;', '&')
-    .replaceAll('&nbsp;', ' ')
-    .replaceAll('&#39;', "'")
-    .replaceAll('&quot;', '"')
-    .replaceAll('&lt;', '<')
-    .replaceAll('&gt;', '>')
-    .replaceAll(/\s+/g, ' ')
-    .trim();
+/** Cell text, with the whitespace the eFD templates leave behind collapsed. */
+function cellText(cell: HTMLElement): string {
+  return cell.text.replaceAll(/\s+/g, ' ').trim();
+}
+
+/** Every `<td>` of every `<tbody>` row in a table, as text. */
+function tableRows(table: HTMLElement | null | undefined): string[][] {
+  if (!table) return [];
+  return table
+    .querySelectorAll('tbody tr')
+    .map(row => row.querySelectorAll('td').map(cell => cellText(cell)))
+    .filter(cells => cells.length > 0);
 }
 
 /** MM/DD/YYYY → ISO, so dates sort and compare like every other date here. */
@@ -264,13 +265,9 @@ async function senateReportTrades(
       headers: { referer: `${SENATE_HOST}/search/` }
     });
 
-    const body = /<tbody>(.*?)<\/tbody>/s.exec(html)?.[1] ?? '';
-    const rows = [...body.matchAll(/<tr[^>]*>(.*?)<\/tr>/gs)];
+    const rows = tableRows(parseHtml(html).querySelector('table'));
 
-    return rows.flatMap(row => {
-      const cells = [...(row[1] ?? '').matchAll(/<td[^>]*>(.*?)<\/td>/gs)].map(
-        cell => plain(cell[1] ?? '')
-      );
+    return rows.flatMap(cells => {
       // #, date, owner, ticker, asset, asset type, transaction type, amount, comment
       if (cells.length < 8) return [];
       return [
@@ -323,36 +320,24 @@ export async function senateTrades({
 }
 
 /**
- * Pulls the first table that follows a section heading and returns its rows as
- * cell arrays. The eFD annual report is one page of headed tables, so one
- * parser serves every part of it.
+ * Rows of the table belonging to one part of an eFD report.
+ *
+ * The page wraps each part in its own `<section class="card">` containing the
+ * heading and, if the filer disclosed anything, a table. Scoping the table
+ * lookup to that section is what makes an empty part read as empty.
+ *
+ * The regex version this replaced searched forward from the heading for the
+ * next `<table>`, which walked straight past an empty part into the following
+ * one — Part 9's royalty agreements came back as Part 8's board seats, every
+ * column shifted, and nothing about the output looked wrong. That is the exact
+ * failure this codebase exists to avoid, so the parse is structural now.
  */
 export function sectionRows(html: string, heading: string): string[][] {
-  const at = html.indexOf(heading);
-  if (at < 0) return [];
+  const section = parseHtml(html)
+    .querySelectorAll('section.card')
+    .find(card => card.querySelector('h3')?.text.trim().startsWith(heading));
 
-  // Bound the search at the next "Part N." heading. A part the filer left empty
-  // renders as prose with no table at all, and an unbounded search would then
-  // silently adopt the NEXT part's table — Part 9's agreements read back as
-  // Part 8's board seats, with the columns shifted and nothing to flag it.
-  const nextPart = /Part \d+[a-z]?\./g;
-  nextPart.lastIndex = at + heading.length;
-  const boundary = nextPart.exec(html)?.index ?? html.length;
-
-  const tableStart = html.indexOf('<table', at);
-  if (tableStart < 0 || tableStart > boundary) return [];
-
-  const tableEnd = html.indexOf('</table>', tableStart);
-  if (tableEnd < 0) return [];
-
-  const table = html.slice(tableStart, tableEnd);
-  return [...table.matchAll(/<tr[^>]*>(.*?)<\/tr>/gs)]
-    .map(row =>
-      [...(row[1] ?? '').matchAll(/<td[^>]*>(.*?)<\/td>/gs)].map(cell =>
-        plain(cell[1] ?? '')
-      )
-    )
-    .filter(cells => cells.length > 0);
+  return tableRows(section?.querySelector('table'));
 }
 
 /** eFD writes "n/a" where a filer left a comment blank. */
