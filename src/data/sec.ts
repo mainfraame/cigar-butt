@@ -99,7 +99,12 @@ export interface SubmissionsSummary {
 interface CompanyConceptResponse {
   readonly cik: number;
   readonly entityName: string;
-  readonly units: Record<string, CompanyFact[]>;
+  /**
+   * Keyed by unit, and the value is only usually an array of facts. Typed
+   * `unknown` deliberately: asserting the shape is what let one filer's odd
+   * payload crash an analysis.
+   */
+  readonly units: Record<string, unknown>;
 }
 
 interface SubmissionsResponse {
@@ -199,6 +204,28 @@ export async function resolveTicker(ticker: string): Promise<TickerEntry> {
  * Returns an empty array rather than throwing on 404: a company that never
  * tagged `Goodwill` is a company with no goodwill, which is a valid reading.
  */
+/**
+ * The fact array out of an EDGAR `units` map.
+ *
+ * Prefers the units this server understands and otherwise takes the first
+ * array it finds, because a concept reported in an unexpected unit is still
+ * the concept. Anything that is not an array is skipped rather than assumed.
+ */
+function pickFacts(units: Record<string, unknown> | undefined): CompanyFact[] {
+  if (!units) return [];
+
+  for (const key of ['USD', 'shares', 'USD/shares', 'pure']) {
+    const value = units[key];
+    if (Array.isArray(value)) return value as CompanyFact[];
+  }
+
+  for (const value of Object.values(units)) {
+    if (Array.isArray(value)) return value as CompanyFact[];
+  }
+
+  return [];
+}
+
 export async function companyConcept(
   cik: string,
   concept: string,
@@ -215,8 +242,13 @@ export async function companyConcept(
           { ...SEC_RATE, headers: headers() }
         )
     );
-    const usd = data.units['USD'] ?? data.units['shares'] ?? [];
-    return usd.toSorted((a, b) => a.end.localeCompare(b.end));
+    // EDGAR keys facts by unit, and the key is not always one of the two we
+    // expect: a filer may report in `USD/shares`, `pure`, or a unit this
+    // server has never seen. Taking `units.USD` on faith crashed the whole
+    // analysis of Tiptree on a single concept — one odd payload must not
+    // take down a company.
+    const facts = pickFacts(data.units);
+    return facts.toSorted((a, b) => a.end.localeCompare(b.end));
   } catch (error) {
     if (error instanceof Error && error.message.includes('HTTP 404')) return [];
     throw error;
