@@ -102,3 +102,32 @@ describe('parseFills', () => {
     ).toBeUndefined();
   });
 });
+
+describe('extractItem on whole-number headings', () => {
+  const schedule =
+    'Item 3. Source of Funds. Acquired for $7,382,683. ' +
+    'Item 4. Purpose of Transaction. The Reporting Persons intend to engage ' +
+    'with the board regarding capital allocation. ' +
+    'Item 5. Interest in Securities. 6.0% of the class.';
+
+  it('scopes a 13D item, which is numbered without a decimal', () => {
+    // A terminator demanding a decimal ran the section to the end of the
+    // document, burying the one item that says what an activist wants.
+    const section = extractItem(schedule, '4');
+
+    expect(section).toContain('capital allocation');
+    expect(section).not.toContain('Interest in Securities');
+  });
+
+  it('does not answer a bare number with a decimal heading', () => {
+    // "Item 4" must not match inside "Item 4.01", which is a different item
+    // in a different form.
+    expect(extractItem('Item 4.01 Change of accountant.', '4')).toBeUndefined();
+  });
+
+  it('still terminates an 8-K section at the next decimal heading', () => {
+    const eightK = 'Item 3.01 Compliance regained. Item 7.01 A press release.';
+
+    expect(extractItem(eightK, '3.01')).toBe('Item 3.01 Compliance regained.');
+  });
+});

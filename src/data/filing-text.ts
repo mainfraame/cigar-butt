@@ -54,12 +54,20 @@ export function plainText(markup: string): string {
  */
 export function extractItem(text: string, item: string): string | undefined {
   const escaped = item.replaceAll('.', '\\.');
-  const start = new RegExp(`Item\\s+${escaped}\\b`, 'i').exec(text);
+  // A bare number must not be satisfied by a decimal heading — "Item 4"
+  // appears inside "Item 4.01", which is a different item in a different
+  // form. The dot itself is fine, since a 13D writes "Item 4."; it is a dot
+  // *followed by a digit* that means this is really 4.01.
+  const boundary = item.includes('.') ? '\\b' : '(?!\\.?\\d)';
+  const start = new RegExp(`Item\\s+${escaped}${boundary}`, 'i').exec(text);
   if (!start) return undefined;
 
   const rest = text.slice(start.index);
-  // Skip the heading itself before looking for the next one.
-  const next = /Item\s+\d+\.\d+/gi;
+  // The decimal is optional: an 8-K numbers its items 3.01 and a 13D numbers
+  // them 4, so a terminator demanding a decimal runs a 13D section to the end
+  // of the document — which is how Item 4, the one that says what an activist
+  // wants, came back buried in fourteen thousand characters.
+  const next = /Item\s+\d+(\.\d+)?/gi;
   next.lastIndex = start[0].length;
   const match = next.exec(rest);
 
