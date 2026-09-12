@@ -59,6 +59,20 @@ jobs:
       - name: Test
         run: pnpm test
 
+      # docs/credentials.md is generated from the provider registry. A page that
+      # has drifted from what the server actually reads is worse than none, so
+      # regenerate and fail if anything moved — that is exactly what a PR forgot
+      # to commit.
+      - name: Credentials doc is in sync
+        run: |
+          pnpm docs:credentials
+          changed=$(git status --porcelain -- docs/credentials.md)
+          if [ -n "$changed" ]; then
+            echo "docs/credentials.md is stale — run 'pnpm docs:credentials' and commit."
+            git --no-pager diff -- docs/credentials.md
+            exit 1
+          fi
+
       # The published artifact is the bundle, so a build break is a release
       # break even when every test passes.
       - name: Build

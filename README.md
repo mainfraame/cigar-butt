@@ -96,6 +96,11 @@ keeps working while you fill things in.
   Without one, `analyze_ticker` still reports the whole balance sheet and says
   the price is unavailable rather than refusing.
 
+> **[Full credentials reference →](docs/credentials.md)** — every integration,
+> sign-up links, step-by-step instructions, the `credentials.json` shape and
+> every environment variable. Generated from the provider registry, so it cannot
+> drift from what the server reads.
+
 **To set them up, just ask.** Call `setup_credentials` with no arguments and the
 server prompts for each value (on clients that support elicitation) or returns
 the registration links for the model to relay. Values are written to a `0600`

@@ -281,10 +281,22 @@ const finnhub: Provider<Quote> = {
   }
 };
 
+/**
+ * 200 requests/minute on the free Basic plan — by a distance the most headroom
+ * here, which is what makes a wide screen practical. Paid plans reach 10,000.
+ *
+ * The catch, verified against a live key: the free plan carries the **IEX feed
+ * only**, not the consolidated SIP tape. IEX is roughly 2% of US volume, so its
+ * last trade can differ from the consolidated close — ASTE came back $41.49
+ * against $41.42 everywhere else. Immaterial against a book value, but two
+ * consequences are not: a thinly-traded micro cap may not have printed on IEX
+ * at all that session, and mixing feeds between an analysis and a rebalance
+ * manufactures drift that is not real.
+ *
+ * So it sits behind the consolidated-tape providers rather than ahead of them,
+ * and every quote names its source so a discrepancy is diagnosable.
+ */
 const alpaca: Provider<Quote> = {
-  // 200 requests/minute on the free Basic plan — by a distance the most
-  // headroom of anything here, which makes it a strong primary for a wide
-  // screen. Paid plans reach 10,000/min.
   budgets: [{ limit: 200, per: 'minute' }],
   id: 'alpaca',
   label: 'Alpaca',
@@ -354,11 +366,14 @@ const eodhd: Provider<Quote> = {
  * Declared order is the fallback order, best-trusted first. A user can put the
  * service they pay for at the front with CIGAR_BUTT_PROVIDER_ORDER.
  */
+// Order: best data first, then consolidated-tape providers by headroom, then
+// the compromised or tightly-capped ones. Alpaca outranks Polygon on volume but
+// follows Finnhub because Finnhub is consolidated and already generous.
 const QUOTE_PROVIDERS: readonly Provider<Quote>[] = [
   tiingo,
+  finnhub,
   alpaca,
   polygon,
-  finnhub,
   twelvedata,
   alphavantage,
   fmp,

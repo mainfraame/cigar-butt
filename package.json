@@ -43,19 +43,20 @@
   },
   "scripts": {
     "build": "tsdown",
+    "check": "pnpm lint && pnpm format:check && pnpm typecheck && pnpm knip && pnpm test",
     "dev": "tsx watch src/index.ts",
-    "start": "node dist/index.js",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
-    "lint": "oxlint",
-    "lint:fix": "oxlint --fix",
+    "docs:credentials": "tsx scripts/generate-credentials-doc.ts",
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",
     "knip": "knip",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "prepare": "husky",
+    "prepublishOnly": "pnpm build",
+    "start": "node dist/index.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "check": "pnpm lint && pnpm format:check && pnpm typecheck && pnpm knip && pnpm test",
-    "prepare": "husky",
-    "prepublishOnly": "pnpm build"
+    "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "^2.0.0",

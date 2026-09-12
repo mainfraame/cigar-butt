@@ -106,10 +106,13 @@ export const PROVIDERS: readonly ProviderSpec[] = [
     id: 'alpaca',
     label: 'Alpaca (key ID)',
     purpose:
-      'Quotes, with by far the most headroom of any free tier here. Needs a ' +
-      'paper-trading account, which is free and takes no card. Requires ' +
-      'ALPACA_API_SECRET_KEY alongside it.',
-    rateLimit: '200 requests/minute on the free Basic plan; IEX feed',
+      'Quotes, with by far the most headroom of any free tier here — 200 a ' +
+      'minute against Tiingo\u2019s 50 an hour. Needs a paper-trading account, ' +
+      'which is free and takes no card, and requires ALPACA_API_SECRET_KEY ' +
+      'alongside it. Note the free plan carries the IEX feed rather than the ' +
+      'consolidated tape, so its prices differ slightly from other providers ' +
+      'and a thin micro cap may not have printed on IEX at all.',
+    rateLimit: '200 requests/minute on the free Basic plan',
     requirement: 'one-of',
     setupSteps: [
       'Sign up at https://alpaca.markets/ — a paper-trading account is free ' +
@@ -117,8 +120,11 @@ export const PROVIDERS: readonly ProviderSpec[] = [
       'Open the dashboard and generate an API key; you get a Key ID and a ' +
         'Secret Key, shown once.',
       'Set ALPACA_API_KEY_ID and ALPACA_API_SECRET_KEY. Both are required.',
-      'The free plan carries the IEX feed rather than full SIP, so a quote is ' +
-        'IEX-only. For a screen that is fine; for execution it is not.'
+      'The free plan carries the IEX feed rather than the full consolidated ' +
+        'tape. Expect small differences against other providers, and treat a ' +
+        'thinly-traded name with care — IEX is about 2% of US volume, so it may ' +
+        'not have printed at all that session. Fine for a screen; not for ' +
+        'execution.'
     ],
     signupUrl: 'https://alpaca.markets/'
   },
