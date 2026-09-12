@@ -1,4 +1,5 @@
 import type { Decimal } from '../math/decimal.ts';
+import type { FeeSchedule } from '../portfolio/fees.ts';
 
 /**
  * The broker-neutral contract.
@@ -138,6 +139,11 @@ export interface BrokerAdapter {
   readonly environment: () => BrokerEnvironment;
   /** This vendor's own word for an environment, e.g. "sandbox" or "paper". */
   readonly environmentLabel: (environment: BrokerEnvironment) => string;
+  /**
+   * This broker's own charges. The statutory fees are identical everywhere and
+   * live in `portfolio/fees.ts`; an adapter supplies only what it sets itself.
+   */
+  readonly feeSchedule: () => FeeSchedule;
   /** Whether the given environment has a usable credential set. */
   readonly hasCredentialsFor: (environment: BrokerEnvironment) => boolean;
   /** Whether the ACTIVE environment is configured. */

@@ -119,3 +119,21 @@ export const TAX_NOTE =
   'period, wash sales, basis adjustments and your own circumstances are not ' +
   'modelled. Confirm against your broker\u2019s records and a tax professional ' +
   'before acting.*';
+
+/**
+ * Appended where an execution cost or a participation figure appears.
+ *
+ * The proportion is the whole point. Selling $10,000 costs about $0.41 in
+ * statutory fees, while spread and market impact on a micro cap run to a
+ * hundred times that — and the spread is not observable from any provider this
+ * server can reach. A penny-exact fee printed without this reads as *the* cost
+ * of trading, which would be wrong by two orders of magnitude in exactly the
+ * illiquid names this method selects for.
+ */
+export const COST_NOTE =
+  '\n\n*Fee figures are statutory charges and commission only — not the cost ' +
+  'of trading. Bid-ask spread and market impact are typically far larger on a ' +
+  'thinly-traded name, are not observable from any data source here, and are ' +
+  'not estimated. Read participation (the order as a share of a normal ' +
+  'session) as the cost signal. Statutory rates change without much notice; ' +
+  'the effective dates are reported so a stale figure is visible.*';

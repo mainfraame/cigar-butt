@@ -9,6 +9,7 @@ import { planRebalance } from '../portfolio/rebalance.ts';
 import {
   attempt,
   cell,
+  COST_NOTE,
   DISCLAIMER,
   pct,
   requireCapabilities,
@@ -75,6 +76,17 @@ const candidateSchema = z.object({
 
 const holdingSchema = z.object({
   asOf: isoDate,
+  averageDailyVolume: z
+    .number()
+    .nonnegative()
+    .finite()
+    .optional()
+    .describe(
+      'Typical dollar volume in a session, from `price_history_stats`. Supply ' +
+        'it to learn what share of a normal day each order represents — the ' +
+        'cost that actually matters, and the only one computable without ' +
+        'bid/ask data no free provider exposes.'
+    ),
   costBasis: z
     .number()
     .nonnegative()
@@ -132,7 +144,12 @@ export function registerPortfolioTools(server: McpServer): void {
           .nonnegative()
           .finite()
           .default(0)
-          .describe('Per-trade commission, subtracted before sizing.')
+          .describe(
+            'Per-trade commission. Zero is correct at both supported brokers ' +
+              'for a listed equity buy — there is no buy-side statutory fee at ' +
+              'all — so raise it only for an OTC name (E*TRADE charges $6.95) ' +
+              'or a broker that still bills commission.'
+          )
       }),
       title: 'Build an allocation'
     },
@@ -237,6 +254,7 @@ export function registerPortfolioTools(server: McpServer): void {
             driftTolerance: dec(args.driftTolerance) ?? ZERO,
             holdings: args.holdings.map(holding => ({
               asOf: holding.asOf,
+              averageDailyVolume: dec(holding.averageDailyVolume),
               costBasis: dec(holding.costBasis),
               price: dec(holding.price) ?? ZERO,
               shares: dec(holding.shares) ?? ZERO,
@@ -289,6 +307,7 @@ export function registerPortfolioTools(server: McpServer): void {
                 'this method: a name that has closed its discount has done its job, ' +
                 'and holding it past that point is a different decision than the one ' +
                 'that bought it.' +
+                COST_NOTE +
                 TAX_NOTE +
                 DISCLAIMER
             )

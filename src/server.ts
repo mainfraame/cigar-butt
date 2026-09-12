@@ -10,6 +10,7 @@ import { registerMarketTools } from './tools/market.ts';
 import { registerPortfolioTools } from './tools/portfolio.ts';
 import { registerResearchTools } from './tools/research.ts';
 import { registerSetupTools } from './tools/setup.ts';
+import { registerTechnicalTools } from './tools/technical.ts';
 import { registerUkTools } from './tools/uk.ts';
 import { registerWatchTools } from './tools/watch.ts';
 
@@ -61,6 +62,15 @@ Rules that hold regardless of what the user asks for:
   up empty, that is a real finding — say so, and offer \`edinet_search\` rather
   than loosening filters until something qualifies.
 - Flag correlation. Four shipping names in a 20-name book is not four bets.
+- \`price_history_stats\` is price and volume only — how much of a name trades,
+  how long a position would take to sell, how far it has fallen. It is outside
+  the method: no statistic in it bears on whether a balance sheet is cheap, and
+  none of it may be used to time a purchase. Its one veto is liquidity — a name
+  you cannot exit is a name you cannot own, whatever the discount.
+- Never turn a participation ratio into a dollar cost. Spread and market impact
+  are not observable from anything here and are not estimated; the fee figures
+  are statutory charges only and are a hundred times smaller than the real cost
+  of trading a thin name.
 - Never state a tax liability, a tax rate, or a short/long-term
   characterisation. An account whose tax treatment reads \`unknown\` is
   undetermined — do NOT read it as taxable, and do not fill the gap yourself.
@@ -105,6 +115,7 @@ export function createServer(): McpServer {
   registerResearchTools(server);
   registerMarketTools(server);
   registerPortfolioTools(server);
+  registerTechnicalTools(server);
   registerBrokerTools(server);
   registerCongressTools(server);
   registerJapanTools(server);

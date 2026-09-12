@@ -3,6 +3,19 @@ import { describe, expect, it } from 'vitest';
 import { Decimal } from '../math/decimal.ts';
 import { planRebalance } from './rebalance.ts';
 
+const withVolume = (
+  ticker: string,
+  shares: number,
+  price: number,
+  adv: number
+) => ({
+  asOf: '2026-09-11',
+  averageDailyVolume: new Decimal(adv),
+  price: new Decimal(price),
+  shares: new Decimal(shares),
+  ticker
+});
+
 const holding = (ticker: string, shares: number, price: number) => ({
   asOf: '2026-09-11',
   price: new Decimal(price),
@@ -289,5 +302,65 @@ describe('gain on exit', () => {
 
     expect(plan.exits[0]?.costBasis).toBeUndefined();
     expect(plan.exits[0]?.gainOnExit).toBeUndefined();
+  });
+});
+
+describe('participation', () => {
+  it('reports each order as a share of a normal session', () => {
+    const plan = planRebalance({
+      availableCash: new Decimal(0),
+      holdings: [withVolume('THIN', 5000, 10, 80_000)],
+      targets: []
+    });
+
+    // 50,000 of notional against 80,000 a day.
+    expect(plan.exits[0]?.participation).toBeCloseTo(0.625, 3);
+  });
+
+  it('warns when an order exceeds a fifth of a session', () => {
+    const plan = planRebalance({
+      availableCash: new Decimal(0),
+      holdings: [withVolume('THIN', 5000, 10, 80_000)],
+      targets: []
+    });
+
+    expect(plan.notes.join(' ')).toContain("20% of a normal session's volume");
+  });
+
+  it('stays quiet for an order a liquid name absorbs', () => {
+    const plan = planRebalance({
+      availableCash: new Decimal(0),
+      holdings: [withVolume('LIQ', 100, 10, 9_000_000)],
+      targets: []
+    });
+
+    expect(plan.notes.join(' ')).not.toContain('normal session');
+  });
+
+  it('leaves participation undefined when no volume was supplied', () => {
+    // An unknown participation is not a small one, so it must not read as zero
+    // and must not trigger the all-clear.
+    const plan = planRebalance({
+      availableCash: new Decimal(0),
+      holdings: [holding('AAA', 5000, 10)],
+      targets: []
+    });
+
+    expect(plan.exits[0]?.participation).toBeUndefined();
+  });
+
+  it('carries volume through a multi-lot merge', () => {
+    // A property of the security, not the lot — and the merge rebuilds the
+    // object, which is exactly where costBasis was dropped once already.
+    const plan = planRebalance({
+      availableCash: new Decimal(0),
+      holdings: [
+        withVolume('THIN', 2000, 10, 80_000),
+        withVolume('THIN', 3000, 10, 80_000)
+      ],
+      targets: []
+    });
+
+    expect(plan.exits[0]?.participation).toBeCloseTo(0.625, 3);
   });
 });

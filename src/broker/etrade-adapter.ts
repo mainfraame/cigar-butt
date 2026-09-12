@@ -8,6 +8,7 @@ import {
   portfolioPositions,
   setEnvironment
 } from '../data/etrade.ts';
+import { dec, ZERO } from '../math/decimal.ts';
 import {
   netPositions,
   type BrokerAdapter,
@@ -55,6 +56,14 @@ export const etradeAdapter: BrokerAdapter = {
   environment: () => (environment() === 'sandbox' ? 'test' : 'live'),
 
   environmentLabel: env => toEtrade(env),
+
+  feeSchedule: () => ({
+    commission: ZERO,
+    // E*TRADE charges $6.95 on an OTC name, dropping to $4.95 above 30 trades
+    // a quarter. The higher figure is used: understating a cost is the worse
+    // error, and this server cannot see the trade count.
+    otcSurcharge: dec('6.95') ?? ZERO
+  }),
 
   hasCredentialsFor: env =>
     configuredEnvironments().find(entry => entry.env === toEtrade(env))

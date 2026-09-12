@@ -10,6 +10,7 @@ import {
   out,
   ZERO
 } from '../math/decimal.ts';
+import { estimateFees, participation, type FeeSchedule } from './fees.ts';
 
 /**
  * Turning a target allocation into orders.
@@ -23,6 +24,13 @@ import {
 interface Holding {
   /** ISO date of `price`. */
   readonly asOf: string;
+  /**
+   * Typical dollar volume in a session. Supply it to learn what fraction of a
+   * normal day an order represents — the cost that actually matters here, and
+   * the only one computable without data no free provider exposes.
+   * `price_history_stats` reports it.
+   */
+  readonly averageDailyVolume?: Decimal;
   /** Broker-reported aggregate basis. Absent means the broker did not supply one. */
   readonly costBasis?: Decimal;
   /** Price the position is currently marked at. */
@@ -46,6 +54,11 @@ export interface RebalanceInput {
   readonly availableCash: Decimal;
   /** Ignore drift smaller than this fraction of the target. Default 0.05. */
   readonly driftTolerance?: Decimal;
+  /**
+   * The broker's own charges. Omit and no fee is estimated — better than
+   * asserting zero, which is right for a buy and wrong for a sale.
+   */
+  readonly feeSchedule?: FeeSchedule;
   readonly holdings: readonly Holding[];
   /** Don't emit an order whose notional is below this. Default 0. */
   readonly minTradeValue?: Decimal;
@@ -64,6 +77,13 @@ export interface Order {
   readonly currentShares: number;
   readonly currentValue: number;
   readonly driftFraction: number;
+  /**
+   * Statutory fees plus commission. **Not the cost of the trade.** Selling
+   * $10,000 costs about $0.41 here, while spread and market impact on a
+   * micro cap run to a hundred times that — so read `participation` first,
+   * and treat this as the small, knowable part.
+   */
+  readonly estimatedFees?: number;
   readonly estimatedProceeds: number;
   /**
    * `estimatedProceeds − costBasis`, on a FULL exit only, and only when the
@@ -80,6 +100,11 @@ export interface Order {
    * wash-sale or basis adjustment, no holding-period split.
    */
   readonly gainOnExit?: number;
+  /**
+   * The order as a fraction of a normal session's dollar volume. Absent when
+   * no volume was supplied — an unknown participation is not a small one.
+   */
+  readonly participation?: number;
   readonly price: number;
   readonly shares: number;
   readonly side: 'buy' | 'sell';
@@ -137,6 +162,9 @@ function mergeHoldings(holdings: readonly Holding[]): Holding[] {
 
       return {
         asOf: newest.asOf,
+        // A property of the security, not of the lot, so the newest reading
+        // wins rather than being summed.
+        averageDailyVolume: newest.averageDailyVolume,
         costBasis:
           opposed || known.length === 0
             ? undefined
@@ -291,14 +319,27 @@ export function planRebalance(input: RebalanceInput): RebalancePlan {
         ? currentValue.minus(holding.costBasis)
         : undefined;
 
+    const fees = input.feeSchedule
+      ? estimateFees({
+          notional,
+          schedule: input.feeSchedule,
+          shares: shareDelta,
+          side: gtZero(shareDelta) ? 'buy' : 'sell'
+        })
+      : undefined;
+
+    const dayShare = participation(notional, holding?.averageDailyVolume);
+
     const order: Order = {
       asOf,
       costBasis: money(holding?.costBasis),
       currentShares: out(currentShares, allowFractionalShares ? 4 : 0) ?? 0,
       currentValue: money(currentValue) ?? 0,
       driftFraction: out(drift) ?? 0,
+      estimatedFees: money(fees?.total),
       estimatedProceeds: money(notional) ?? 0,
       gainOnExit: money(gainOnExit),
+      participation: out(dayShare, 4),
       price: money(price) ?? 0,
       shares: out(shareDelta.abs(), allowFractionalShares ? 4 : 0) ?? 0,
       side: gtZero(shareDelta) ? 'buy' : 'sell',
@@ -324,6 +365,23 @@ export function planRebalance(input: RebalanceInput): RebalancePlan {
     notes.push(
       `Buys exceed cash plus sale proceeds by ${asUsd(cashAfter.abs())}. Execute the sells first, ` +
         'or trim the buy list — the orders below are not simultaneously fundable.'
+    );
+  }
+
+  // Participation is where the real cost lives, so a heavy order gets said out
+  // loud rather than left in a column. 20% of a session is the point at which
+  // an order stops being absorbed and starts moving the price against itself.
+  const heavy = [...buys, ...sells, ...exits].filter(
+    order => order.participation !== undefined && order.participation > 0.2
+  );
+  if (heavy.length > 0) {
+    notes.push(
+      `${heavy.length} order(s) exceed 20% of a normal session's volume: ` +
+        `${heavy.map(order => `${order.ticker} at ${Math.round((order.participation ?? 0) * 100)}%`).join(', ')}. ` +
+        'That is where execution cost actually lives — spread and impact on a ' +
+        'thin name run to a hundred times the statutory fees — and in a ' +
+        'deep-value book it is a live risk, because the discount is often ' +
+        'caused by the illiquidity. Work the order over days, or size it down.'
     );
   }
 

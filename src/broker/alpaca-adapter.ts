@@ -1,7 +1,7 @@
 import { cached } from '../cache/store.ts';
 import { getCredential, saveCredentials } from '../config/store.ts';
 import { fetchJson } from '../http/client.ts';
-import { dec, type Decimal } from '../math/decimal.ts';
+import { dec, ZERO, type Decimal } from '../math/decimal.ts';
 import {
   netPositions,
   type BrokerAdapter,
@@ -314,6 +314,9 @@ export const alpacaAdapter: BrokerAdapter = {
   environment,
 
   environmentLabel: env => LABELS[env],
+
+  // Commission-free, including OTC. What remains on a sale is statutory.
+  feeSchedule: () => ({ commission: ZERO, otcSurcharge: ZERO }),
 
   hasCredentialsFor: env =>
     slotValue('key', env) !== undefined &&

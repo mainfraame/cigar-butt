@@ -36,6 +36,8 @@ interface CacheOptions {
 
 /** Seconds. Chosen by how often the underlying fact can actually change. */
 export const TTL = {
+  /** A past daily bar never changes; only the last one is volatile. */
+  bars: 7 * 24 * 60 * 60,
   /** Whole-market frames: a quarter's data is fixed once filed. */
   frames: 7 * 24 * 60 * 60,
   /** Balance-sheet concepts change only when a filing lands. */

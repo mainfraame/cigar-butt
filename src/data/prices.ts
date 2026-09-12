@@ -305,10 +305,19 @@ const alpaca: Provider<Quote> = {
   run: async (ticker, key, rate) => {
     // Alpaca is the one provider here needing two credentials. The pool joins
     // on the key id, so the secret is read directly.
-    const secret = getCredential('ALPACA_API_SECRET_KEY');
+    // Scoped first, unscoped as the fallback — the same order the broker
+    // adapter uses. The registry's `alpaca` entry now points at the paper key
+    // id, so reading only the unscoped secret told anyone with just the scoped
+    // pair that they "need both" while holding both.
+    const secret =
+      getCredential('ALPACA_PAPER_API_SECRET_KEY') ??
+      getCredential('ALPACA_LIVE_API_SECRET_KEY') ??
+      getCredential('ALPACA_API_SECRET_KEY');
     if (!secret) {
       throw new Error(
-        'ALPACA_API_KEY_ID is set but ALPACA_API_SECRET_KEY is not; Alpaca needs both.'
+        'An Alpaca key id is set but no matching secret. Set ' +
+          'ALPACA_PAPER_API_SECRET_KEY (or the LIVE or unscoped equivalent) — ' +
+          'the secret is shown once at creation, so regenerate the pair if lost.'
       );
     }
 
