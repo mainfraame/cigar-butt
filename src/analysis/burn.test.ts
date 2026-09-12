@@ -40,18 +40,40 @@ describe('burnProfile', () => {
       fact('2026-01-01', '2026-06-30', -23_500_000, '10-Q')
     ]);
 
-    const profile = await burnProfile('34956', dec(118_000_000));
+    const profile = await burnProfile(
+      '34956',
+      dec(118_000_000),
+      dec(121_663_000)
+    );
 
     expect(profile.currentBurn?.toFixed(0)).toBe('-47000000');
     expect(profile.selfFunding).toBe(false);
   });
 
-  it('turns cash and burn into a runway', async () => {
+  it('turns cash and burn into a runway for a cash box', async () => {
     facts.set(FLOW, [fact('2026-01-01', '2026-06-30', -23_500_000, '10-Q')]);
 
-    const profile = await burnProfile('34956', dec(118_000_000));
+    // Tenax: $118M of cash inside $121.7M of current assets.
+    const profile = await burnProfile(
+      '34956',
+      dec(118_000_000),
+      dec(121_663_000)
+    );
 
     expect(Number(profile.runwayYears?.toFixed(2))).toBeCloseTo(2.51, 1);
+  });
+
+  it('offers no runway for a business funded by working capital', async () => {
+    // Bridgford: $333K of cash inside $60.3M of current assets, against a
+    // $5.7M burn. Cash over burn said six weeks for a hundred-year-old
+    // manufacturer doing $231M of revenue, which describes nothing.
+    facts.set(FLOW, [fact('2024-11-02', '2025-10-31', -5_692_000)]);
+
+    const profile = await burnProfile('14177', dec(333_000), dec(60_272_000));
+
+    expect(profile.selfFunding).toBe(false);
+    expect(profile.runwayYears).toBeUndefined();
+    expect(Number(profile.cashShare?.toFixed(3))).toBeCloseTo(0.006, 2);
   });
 
   it('reports no runway for a business that funds itself', async () => {

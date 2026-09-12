@@ -42,6 +42,17 @@ export interface Period {
 export interface BurnProfile {
   /** Latest annual operating cash flow, and the one before it. */
   readonly annualCashFlow: readonly Period[];
+  /**
+   * Cash as a share of current assets.
+   *
+   * Decides whether a runway figure means anything. A clinical-stage company
+   * is a cash box: its current assets *are* the cash, and dividing by the
+   * burn gives the date it runs out. A food manufacturer holds its liquidity
+   * as inventory and receivables that convert every cycle, so the same
+   * arithmetic reported Bridgford — $231M of revenue, a hundred years old —
+   * as having six weeks to live.
+   */
+  readonly cashShare: Decimal | undefined;
   /** Most recent interim cash flow, annualised, when one is available. */
   readonly currentBurn: Decimal | undefined;
   readonly revenue: readonly Period[];
@@ -85,7 +96,8 @@ const toPeriod = (fact: CompanyFact): Period | undefined => {
  */
 export async function burnProfile(
   cik: string,
-  cash: Decimal | undefined
+  cash: Decimal | undefined,
+  currentAssets?: Decimal
 ): Promise<BurnProfile> {
   const flows = await companyConcept(cik, CASH_FLOW);
 
@@ -122,8 +134,18 @@ export async function burnProfile(
   const selfFunding =
     annualised === undefined ? undefined : !annualised.isNegative();
 
+  const cashShare = gtZero(currentAssets)
+    ? div(cash, currentAssets)
+    : undefined;
+
+  // Only a cash box has a runway. Below this the company funds itself out of
+  // a working-capital cycle, and cash over burn is not a countdown — it is
+  // two numbers that happen to divide.
+  const isCashBox = cashShare !== undefined && cashShare.gte('0.5');
+
   return {
     annualCashFlow: annual,
+    cashShare,
     currentBurn: annualised,
     revenue: sortBy(
       revenueFacts.filter(
@@ -136,7 +158,10 @@ export async function burnProfile(
       .slice(-2)
       .toReversed(),
     runwayYears:
-      annualised !== undefined && annualised.isNegative() && gtZero(cash)
+      isCashBox &&
+      annualised !== undefined &&
+      annualised.isNegative() &&
+      gtZero(cash)
         ? div(cash, annualised.abs())
         : undefined,
     selfFunding

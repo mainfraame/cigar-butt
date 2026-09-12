@@ -27,6 +27,7 @@ import {
   attempt,
   cell,
   DISCLAIMER,
+  pct,
   requireCapabilities,
   text,
   usd
@@ -213,7 +214,11 @@ export function registerResearchTools(server: McpServer): void {
         // reason to fail the analysis.
         // Graham's asset test assumes the assets survive the wait. This is
         // the check that says whether they will.
-        const burn = await burnProfile(cik, sheet.cash?.value);
+        const burn = await burnProfile(
+          cik,
+          sheet.cash?.value,
+          sheet.assetsCurrent?.value
+        );
 
         const vendorShares = await attemptShares(entry.ticker);
         const shareCheck = checkShareCounts(
@@ -310,16 +315,24 @@ export function registerResearchTools(server: McpServer): void {
                 'written for — the assets are still there while you wait.\n\n'
               : `**Operations consume cash** at about ${usd(out(burn.currentBurn?.abs(), 0))} ` +
                 'a year, annualised from the latest period rather than from ' +
-                'the last full year, because a company that has just lost a ' +
-                'trial or an exclusivity is not burning at last year\u2019s ' +
+                'the last full year — a business that has just lost a trial, a ' +
+                'contract or an exclusivity is not burning at last year\u2019s ' +
                 'rate.' +
                 (burn.runwayYears === undefined
-                  ? '\n\n'
+                  ? ' No runway figure is offered: cash is ' +
+                    `${burn.cashShare === undefined ? 'an unknown share' : pct(out(burn.cashShare) ?? 0)} ` +
+                    'of current assets, so this is a business funded by a ' +
+                    'working-capital cycle rather than a cash box. Dividing its ' +
+                    'cash by its burn produces a countdown that does not ' +
+                    'describe anything — inventory and receivables convert, and ' +
+                    'a manufacturer holding a fortnight of cash is normal.\n\n'
                   : ` That is **${out(burn.runwayYears, 1)} years** of runway ` +
-                    'against the cash on the balance sheet. Net current assets ' +
-                    'shrink by roughly that burn every year, so a discount to ' +
-                    'them is a wasting one — the question is whether the ' +
-                    'discount closes before the assets do.\n\n')) +
+                    'against the cash on the balance sheet, which is the right ' +
+                    `measure here because cash is ${pct(out(burn.cashShare) ?? 0)} of ` +
+                    'current assets — the company is a cash box. Net current ' +
+                    'assets shrink by roughly that burn every year, so a ' +
+                    'discount to them is a wasting one, and the question is ' +
+                    'whether it closes before the assets do.\n\n')) +
             'Cash flow is from the statement, not derived from earnings. ' +
             'Annualising an interim period assumes the rest of the year looks ' +
             'like it has so far, which is an assumption, not a forecast.\n\n'
