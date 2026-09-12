@@ -1,0 +1,136 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": [
+    "eslint",
+    "typescript",
+    "unicorn",
+    "oxc",
+    "import",
+    "node",
+    "promise",
+    "vitest"
+  ],
+  "jsPlugins": ["eslint-plugin-perfectionist"],
+  "categories": {
+    "correctness": "error",
+    "pedantic": "off",
+    "perf": "error",
+    "restriction": "off",
+    "style": "off",
+    "suspicious": "error"
+  },
+  "env": {
+    "es2024": true,
+    "node": true
+  },
+  "rules": {
+    "eslint/eqeqeq": ["error", "smart"],
+    "eslint/no-console": "error",
+    "eslint/prefer-const": "error",
+    "import/no-cycle": "error",
+    "typescript/consistent-type-imports": "error",
+    "typescript/no-explicit-any": "warn",
+    "typescript/no-unused-vars": [
+      "error",
+      {
+        "argsIgnorePattern": "^_",
+        "caughtErrors": "none",
+        "varsIgnorePattern": "^_"
+      }
+    ],
+    "unicorn/prefer-node-protocol": "error",
+    "perfectionist/sort-array-includes": [
+      "error",
+      {
+        "ignoreCase": false,
+        "order": "asc",
+        "type": "natural"
+      }
+    ],
+    "perfectionist/sort-classes": [
+      "error",
+      {
+        "ignoreCase": false,
+        "order": "asc",
+        "type": "natural"
+      }
+    ],
+    "perfectionist/sort-enums": [
+      "error",
+      {
+        "ignoreCase": false,
+        "order": "asc",
+        "sortByValue": "never",
+        "type": "natural"
+      }
+    ],
+    "perfectionist/sort-exports": [
+      "error",
+      {
+        "ignoreCase": false,
+        "order": "asc",
+        "type": "natural"
+      }
+    ],
+    "perfectionist/sort-interfaces": [
+      "error",
+      {
+        "ignoreCase": false,
+        "order": "asc",
+        "type": "natural"
+      }
+    ],
+    "perfectionist/sort-intersection-types": [
+      "error",
+      {
+        "ignoreCase": false,
+        "order": "asc",
+        "type": "natural"
+      }
+    ],
+    "perfectionist/sort-object-types": [
+      "error",
+      {
+        "ignoreCase": false,
+        "order": "asc",
+        "type": "natural"
+      }
+    ],
+    "perfectionist/sort-objects": [
+      "error",
+      {
+        "ignoreCase": false,
+        "order": "asc",
+        "type": "natural"
+      }
+    ],
+    "perfectionist/sort-union-types": [
+      "error",
+      {
+        "ignoreCase": false,
+        "order": "asc",
+        "type": "natural"
+      }
+    ],
+    // Off deliberately: every upstream here is rate-limited (SEC 10/s, Polygon
+    // 5/min, Tiingo ~50 tickers/hr) and the retry/backoff loops must serialise.
+    // Promise.all would trip those limits rather than speed anything up.
+    "eslint/no-await-in-loop": "off"
+  },
+  "overrides": [
+    {
+      "files": ["**/*.test.ts"],
+      "rules": {
+        "perfectionist/sort-objects": "off",
+        "typescript/no-explicit-any": "off"
+      }
+    },
+    {
+      "files": ["*.config.ts"],
+      "rules": {
+        "eslint/no-console": "off"
+      }
+    }
+  ],
+  "ignorePatterns": ["dist/**", "coverage/**", "**/*.d.ts"]
+}

@@ -1,0 +1,9 @@
+pnpm exec lint-staged
+
+# pnpm's npm-audit equivalent, run only when this commit changes the dependency
+# graph (the lockfile is the audit's entire input, so other commits can't change
+# the result). CI runs the same gate on every PR as the backstop.
+if git diff --cached --name-only | grep -qx 'pnpm-lock.yaml'; then
+  echo 'pnpm-lock.yaml changed — auditing dependencies…'
+  pnpm audit --audit-level moderate
+fi

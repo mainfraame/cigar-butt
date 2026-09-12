@@ -1,0 +1,324 @@
+import type { McpServer } from '@modelcontextprotocol/server';
+
+import * as z from 'zod/v4';
+
+import { screenMarket } from '../analysis/screen.ts';
+import { dec, out, ZERO } from '../math/decimal.ts';
+import { allocate } from '../portfolio/allocate.ts';
+import { planRebalance } from '../portfolio/rebalance.ts';
+import { attempt, DISCLAIMER, pct, requireSetup, text, usd } from './shared.ts';
+
+import type { Order } from '../portfolio/rebalance.ts';
+
+/** Renders one side of a rebalance plan; empty sections are omitted entirely. */
+function orderTable(title: string, orders: readonly Order[]): string {
+  if (orders.length === 0) return '';
+  const rows = orders
+    .map(
+      order =>
+        `| ${order.ticker} | ${order.shares} | ${usd(order.price)} | ${usd(order.estimatedProceeds)} | ${usd(order.currentValue)} | ${usd(order.targetValue)} | ${pct(order.driftFraction)} | ${order.asOf} |`
+    )
+    .join('\n');
+  return (
+    `### ${title}\n\n` +
+    '| Ticker | Shares | Price | Notional | Now | Target | Drift | As of |\n' +
+    `|---|---|---|---|---|---|---|---|\n${rows}\n\n`
+  );
+}
+
+const isoDate = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be an ISO date, e.g. 2026-09-12')
+  .describe(
+    'The date this price is as of. Required — an undated price cannot be sized against.'
+  );
+
+const positiveMoney = z.number().positive().finite();
+
+const candidateSchema = z.object({
+  asOf: isoDate,
+  price: positiveMoney.describe('Current price per share.'),
+  ticker: z.string().min(1).max(10),
+  weight: z
+    .number()
+    .positive()
+    .finite()
+    .optional()
+    .describe(
+      'Relative weight. Omit for equal weight, which is what the method calls for — ' +
+        'Schloss deliberately distrusted per-name conviction.'
+    )
+});
+
+const holdingSchema = z.object({
+  asOf: isoDate,
+  price: positiveMoney.describe('Price the position is currently marked at.'),
+  shares: z.number().nonnegative().finite(),
+  ticker: z.string().min(1).max(10)
+});
+
+const targetSchema = z.object({
+  asOf: isoDate,
+  price: positiveMoney,
+  ticker: z.string().min(1).max(10),
+  weight: z
+    .number()
+    .nonnegative()
+    .finite()
+    .describe('Fraction of the portfolio. Normalised across the target list.')
+});
+
+export function registerPortfolioTools(server: McpServer): void {
+  server.registerTool(
+    'build_allocation',
+    {
+      annotations: { openWorldHint: false, readOnlyHint: true },
+      description:
+        'Turn a verified candidate list and a cash balance into whole-share position ' +
+        'targets. Equal weight by default, with a per-name cap and whole-share ' +
+        'rounding that always rounds down, so the plan can never exceed the balance. ' +
+        'Only pass names you have actually verified with `analyze_ticker`: a weighting ' +
+        'implies a level of diligence a screen does not provide.',
+      inputSchema: z.object({
+        allowFractionalShares: z
+          .boolean()
+          .default(false)
+          .describe('Most brokers settle whole lots; off by default.'),
+        availableCash: positiveMoney.describe('Cash available to deploy.'),
+        candidates: z.array(candidateSchema).min(1).max(200),
+        maxPositionFraction: z
+          .number()
+          .positive()
+          .max(1)
+          .default(0.1)
+          .describe(
+            'Hard ceiling on any one name, as a fraction of the balance.'
+          ),
+        perTradeCost: z
+          .number()
+          .nonnegative()
+          .finite()
+          .default(0)
+          .describe('Per-trade commission, subtracted before sizing.')
+      }),
+      title: 'Build an allocation'
+    },
+    args =>
+      Promise.resolve(
+        attempt(() => {
+          const plan = allocate({
+            allowFractionalShares: args.allowFractionalShares,
+            availableCash: dec(args.availableCash) ?? ZERO,
+            candidates: args.candidates.map(candidate => ({
+              asOf: candidate.asOf,
+              price: dec(candidate.price) ?? ZERO,
+              ticker: candidate.ticker.toUpperCase(),
+              weight: dec(candidate.weight)
+            })),
+            maxPositionFraction: dec(args.maxPositionFraction) ?? ZERO,
+            perTradeCost: dec(args.perTradeCost) ?? ZERO
+          });
+
+          const rows = plan.lines
+            .map(
+              line =>
+                `| ${line.ticker} | ${line.shares} | ${usd(line.price)} | ${usd(line.cost)} | ${pct(line.weight)} | ${line.asOf} |`
+            )
+            .join('\n');
+
+          return Promise.resolve(
+            text(
+              `## Allocation\n\n` +
+                `| Ticker | Shares | Price | Cost | Weight | Price as of |\n|---|---|---|---|---|---|\n${rows}\n\n` +
+                `Deployed ${usd(plan.deployedCash)} of ${usd(args.availableCash)}; ` +
+                `${usd(plan.residualCash)} left as cash after ${usd(plan.totalCommission)} in commissions.\n\n` +
+                (plan.notFunded.length > 0
+                  ? `### Not funded\n\n${plan.notFunded
+                      .map(entry => `- **${entry.ticker}**: ${entry.reason}`)
+                      .join('\n')}\n\n`
+                  : '') +
+                (plan.warnings.length > 0
+                  ? `### Warnings\n\n${plan.warnings.map(w => `- ${w}`).join('\n')}\n\n`
+                  : '') +
+                'Equal weight is the method, not a default to be improved on: the ' +
+                'strategy works statistically across many names, and any weighting ' +
+                'that expresses conviction is a different strategy.' +
+                DISCLAIMER
+            )
+          );
+        })
+      )
+  );
+
+  server.registerTool(
+    'plan_rebalance',
+    {
+      annotations: { openWorldHint: false, readOnlyHint: true },
+      description:
+        'Compare current holdings against a target allocation and produce the buys, ' +
+        'sells and full exits that close the gap. Compares market value, not share ' +
+        'count, so a name that has re-rated shows as overweight. Sells are reported ' +
+        'before buys because the proceeds fund them, and the plan says explicitly ' +
+        'when the buys are not fundable from cash plus proceeds.',
+      inputSchema: z.object({
+        allowFractionalShares: z.boolean().default(false),
+        availableCash: z
+          .number()
+          .nonnegative()
+          .finite()
+          .default(0)
+          .describe('Uninvested cash, folded into the portfolio value.'),
+        driftTolerance: z
+          .number()
+          .min(0)
+          .max(1)
+          .default(0.05)
+          .describe(
+            'Ignore drift below this fraction of target. Exits are never suppressed by it.'
+          ),
+        holdings: z.array(holdingSchema).max(500),
+        minTradeValue: z
+          .number()
+          .nonnegative()
+          .finite()
+          .default(0)
+          .describe('Suppress orders whose notional is below this.'),
+        targets: z.array(targetSchema).max(500)
+      }),
+      title: 'Plan a rebalance'
+    },
+    args =>
+      Promise.resolve(
+        attempt(() => {
+          const plan = planRebalance({
+            allowFractionalShares: args.allowFractionalShares,
+            availableCash: dec(args.availableCash) ?? ZERO,
+            driftTolerance: dec(args.driftTolerance) ?? ZERO,
+            holdings: args.holdings.map(holding => ({
+              asOf: holding.asOf,
+              price: dec(holding.price) ?? ZERO,
+              shares: dec(holding.shares) ?? ZERO,
+              ticker: holding.ticker.toUpperCase()
+            })),
+            minTradeValue: dec(args.minTradeValue) ?? ZERO,
+            targets: args.targets.map(target => ({
+              asOf: target.asOf,
+              price: dec(target.price) ?? ZERO,
+              ticker: target.ticker.toUpperCase(),
+              weight: dec(target.weight) ?? ZERO
+            }))
+          });
+
+          return Promise.resolve(
+            text(
+              `## Rebalance plan\n\n` +
+                `Portfolio value ${usd(plan.portfolioValue)} including ${usd(args.availableCash)} cash.\n\n` +
+                orderTable('Sell', plan.sells) +
+                orderTable('Exit (held, not in targets)', plan.exits) +
+                orderTable('Buy', plan.buys) +
+                `Net cash flow ${usd(plan.netCashFlow)}; cash after execution ${usd(plan.cashAfter)}.\n\n` +
+                (plan.unchanged.length > 0
+                  ? `### Within tolerance — no order\n\n${plan.unchanged
+                      .map(
+                        entry =>
+                          `- ${entry.ticker} (${pct(entry.driftFraction)} drift)`
+                      )
+                      .join('\n')}\n\n`
+                  : '') +
+                (plan.notes.length > 0
+                  ? `### Notes\n\n${plan.notes.map(note => `- ${note}`).join('\n')}\n\n`
+                  : '') +
+                'Execute the sells before the buys. Selling is the harder half of ' +
+                'this method: a name that has closed its discount has done its job, ' +
+                'and holding it past that point is a different decision than the one ' +
+                'that bought it.' +
+                DISCLAIMER
+            )
+          );
+        })
+      )
+  );
+
+  server.registerTool(
+    'screen_market',
+    {
+      annotations: { openWorldHint: true, readOnlyHint: true },
+      description:
+        'Screen every SEC filer that reported in a quarter, using the XBRL `frames` ' +
+        'endpoint. Five requests total regardless of universe size. Computes tangible ' +
+        'book and NCAV for the whole market from primary filing data — no commercial ' +
+        'screener. Returns candidates ranked by NCAV as a share of tangible book. ' +
+        'It attaches NO prices: pairing a stale quote with a filing figure is the ' +
+        'mistake this server exists to prevent, so run `analyze_ticker` on the ' +
+        'survivors to get a dated price and a verdict.',
+      inputSchema: z.object({
+        limit: z.number().int().min(1).max(200).default(50),
+        minNcavRatio: z
+          .number()
+          .min(0)
+          .max(5)
+          .default(0.5)
+          .describe(
+            'Require NCAV to be at least this fraction of tangible book. Higher means ' +
+              'closer to a pure liquid-balance-sheet company.'
+          ),
+        minTangibleBook: z
+          .number()
+          .nonnegative()
+          .default(50_000_000)
+          .describe(
+            'Floor on tangible book in dollars. Below roughly $50M of market cap, ' +
+              'spreads eat the return.'
+          ),
+        period: z
+          .string()
+          .regex(
+            /^CY\d{4}(Q[1-4]I?)?$/,
+            'Format is CY2026Q1I for an instantaneous (balance-sheet) frame.'
+          )
+          .describe(
+            'Reporting period, e.g. CY2026Q1I. Balance-sheet concepts need the ' +
+              'trailing I. Use a quarter old enough that most filers have reported.'
+          )
+      }),
+      title: 'Screen the whole market'
+    },
+    ({ limit, minNcavRatio, minTangibleBook, period }) =>
+      attempt(async () => {
+        const blocked = requireSetup();
+        if (blocked) return blocked;
+
+        const { rows, universeSize } = await screenMarket({
+          minNcavRatio: dec(minNcavRatio),
+          minTangibleBook: dec(minTangibleBook),
+          period
+        });
+
+        const shown = rows.slice(0, limit);
+        const table = shown
+          .map(
+            row =>
+              `| ${row.entityName} | ${row.cik} | ${usd(out(row.tangibleBook, 0))} | ${usd(out(row.ncav, 0))} | ${pct(out(row.ncavToTangibleBook))} | ${row.periodEnd} |`
+          )
+          .join('\n');
+
+        return text(
+          `## Market screen — ${period}\n\n` +
+            `${universeSize} filers reported \`StockholdersEquity\` for this period; ` +
+            `${rows.length} cleared the filters; showing ${shown.length}.\n\n` +
+            `| Company | CIK | Tangible book | NCAV | NCAV/TBV | Period end |\n|---|---|---|---|---|---|\n${table}\n\n` +
+            '**These are candidates, not results.** No price is attached, so nothing ' +
+            'here says a name is cheap — only that its balance sheet is the right ' +
+            'shape. Run `check_disqualifiers` and then `analyze_ticker` on each name ' +
+            'before it goes anywhere near a portfolio.\n\n' +
+            (rows.length < 15
+              ? 'Fewer than 15 names cleared. Asset-based screens empty out after a ' +
+                'broad rally, and the universe may simply not contain enough ' +
+                'qualifying names right now. Loosening the filters until it does ' +
+                'means you are no longer running this strategy.\n'
+              : '') +
+            DISCLAIMER
+        );
+      })
+  );
+}

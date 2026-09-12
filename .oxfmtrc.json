@@ -1,0 +1,46 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+
+  "arrowParens": "avoid",
+  "bracketSameLine": true,
+  "bracketSpacing": true,
+  "embeddedLanguageFormatting": "auto",
+  "endOfLine": "lf",
+  "htmlWhitespaceSensitivity": "strict",
+  "insertFinalNewline": true,
+  "jsxSingleQuote": true,
+  "printWidth": 80,
+  "proseWrap": "preserve",
+  "quoteProps": "as-needed",
+  "semi": true,
+  "singleQuote": true,
+  "tabWidth": 2,
+  "trailingComma": "none",
+  "useTabs": false,
+
+  "sortImports": {
+    "customGroups": [
+      { "elementNamePattern": ["@*", "@*/**"], "groupName": "scoped" }
+    ],
+    "groups": [
+      "scoped",
+      ["builtin", "external"],
+      ["internal", "subpath"],
+      ["parent", "sibling", "index"],
+      "type",
+      "unknown"
+    ],
+    "ignoreCase": false,
+    "newlinesBetween": true,
+    "order": "asc"
+  },
+
+  "sortPackageJson": true,
+
+  "ignorePatterns": [
+    "dist/**",
+    "coverage/**",
+    "pnpm-lock.yaml",
+    "*.tsbuildinfo"
+  ]
+}

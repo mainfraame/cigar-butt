@@ -1,0 +1,13 @@
+node_modules/
+dist/
+coverage/
+*.log
+*.tsbuildinfo
+.DS_Store
+.idea/
+
+# Credentials. The server also writes a config file under the user's XDG
+# config dir; nothing secret should ever land inside the repo.
+.env
+.env.local
+*.key

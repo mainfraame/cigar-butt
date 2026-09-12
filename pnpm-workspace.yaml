@@ -1,0 +1,9 @@
+# Not a monorepo — this file exists because pnpm 11+ reads its supply-chain
+# settings from here rather than from .npmrc. It mirrors the policy used across
+# the author's other repos.
+
+# pnpm blocks every dependency install/build script by default. Only the ones
+# listed here are allowed to run. esbuild ships a platform-native binary that
+# vitest's dep optimizer needs, so its postinstall is genuinely required.
+allowBuilds:
+  esbuild: true

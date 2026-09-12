@@ -1,0 +1,14 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": ["src/index.ts"],
+  "project": ["src/**/*.ts"],
+
+  // Perfectionist is loaded by oxlint through its `jsPlugins` field, which knip
+  // does not parse — without this it reads as an unused devDependency.
+  "ignoreDependencies": ["eslint-plugin-perfectionist"],
+
+  "vitest": {
+    "config": ["vitest.config.ts"],
+    "entry": ["src/**/*.test.ts"]
+  }
+}

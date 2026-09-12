@@ -1,0 +1,65 @@
+name: ci
+
+# Gates the package on every PR and on mainline pushes: the dependency audit,
+# lint, format check, the Knip dead-code/dependency report, a real type-check
+# (vitest does NOT type-check at runtime), the test suite, and a build. The
+# tests are hermetic — no test touches the network — so there is nothing to
+# stub and no credentials in CI.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# One in-flight run per ref; a new push cancels the previous run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: audit · lint · knip · type-check · test · build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # pnpm first so setup-node's pnpm cache can find it. The version comes
+      # from the `packageManager` field in package.json.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      # Honours the lockfile and the build-script allowlist in pnpm-workspace.yaml.
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # Known advisories against anything in the lockfile fail the build. The
+      # husky pre-commit hook runs the same check whenever the lockfile changes.
+      - name: Audit dependencies
+        run: pnpm audit --audit-level moderate
+
+      # Lint and format need no build; run them first for a fast signal.
+      - name: Lint
+        run: pnpm lint
+
+      - name: Format check
+        run: pnpm format:check
+
+      - name: Type-check
+        run: pnpm typecheck
+
+      - name: Knip
+        run: pnpm knip
+
+      - name: Test
+        run: pnpm test
+
+      # The published artifact is the bundle, so a build break is a release
+      # break even when every test passes.
+      - name: Build
+        run: pnpm build
