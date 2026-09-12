@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
-import { type Decimal, dec } from '../math/decimal.ts';
+import { type Decimal, dec, ZERO } from '../math/decimal.ts';
 
 /**
  * State for the portfolio watch.
@@ -97,7 +97,13 @@ function connect(): DatabaseSync {
 
 const now = (): number => Math.floor(Date.now() / 1000);
 
-type RuleKind = 'broker_auth' | 'drift' | 'move';
+/**
+ * Only `move` exists. Earlier drafts declared `drift` and `broker_auth` too,
+ * but neither is implemented or settable, and a type advertising capability
+ * the code does not have is a lie the compiler helps tell. They are described
+ * as future work in docs/scheduling-research.md instead.
+ */
+type RuleKind = 'move';
 type Baseline = 'cost' | 'previous_close' | 'reference';
 
 export interface WatchRule {
@@ -337,7 +343,7 @@ export function latestSnapshot(): Snapshot | undefined {
       row['account_id_key'] === null
         ? undefined
         : String(row['account_id_key']),
-    cash: asDecimal(row['cash']) ?? dec(0)!,
+    cash: asDecimal(row['cash']) ?? ZERO,
     holdings: JSON.parse(String(row['holdings'])) as Holding[],
     source: String(row['source']),
     takenAt: Number(row['taken_at'])

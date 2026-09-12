@@ -3,7 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/server';
 import { sortBy } from 'lodash-es';
 import * as z from 'zod/v4';
 
-import { dec, out } from '../math/decimal.ts';
+import { dec, out, ZERO } from '../math/decimal.ts';
 import { channelAvailability, logPath } from '../watch/channels.ts';
 import {
   latestSnapshot,
@@ -355,7 +355,7 @@ export function registerWatchTools(server: McpServer): void {
         attempt(() => {
           putSnapshot({
             accountIdKey: undefined,
-            cash: dec(cash) ?? dec(0)!,
+            cash: dec(cash) ?? ZERO,
             holdings: holdings.map(holding => ({
               ...holding,
               ticker: holding.ticker.toUpperCase()

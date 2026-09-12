@@ -154,7 +154,9 @@ export function registerSetupTools(server: McpServer): void {
       inputSchema: z.object({}).meta({ title: 'No arguments' }),
       title: 'Check credential setup'
     },
-    () => Promise.resolve(text(renderSetup()))
+    // Guarded like every other handler: renderSetup reads the credential file,
+    // and an unreadable one should report itself rather than kill the call.
+    () => Promise.resolve(attempt(() => Promise.resolve(text(renderSetup()))))
   );
 
   server.registerTool(

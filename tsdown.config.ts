@@ -9,7 +9,10 @@ import { defineConfig } from 'tsdown';
 // across the boundary stop matching.
 export default defineConfig({
   clean: true,
-  dts: true,
+  // No declarations: this package is a bin, not a library. `main`/`exports`
+  // were removed for the same reason — importing the entry would start an MCP
+  // server on stdio as a side effect.
+  dts: false,
   entry: ['src/index.ts'],
   format: ['esm'],
   outExtensions: () => ({ js: '.js' }),

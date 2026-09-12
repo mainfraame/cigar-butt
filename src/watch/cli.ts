@@ -1,6 +1,6 @@
-import { mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 import { loadEnvFile } from '../config/store.ts';
 import { dec } from '../math/decimal.ts';
@@ -48,15 +48,25 @@ function plistPath(): string {
  */
 const DEFAULT_INTERVAL_MINUTES = 60;
 
+/**
+ * Absolute path to the script launchd should run.
+ *
+ * `process.argv[1]`, not anything derived from `import.meta.url`. The published
+ * artifact is a single bundled file, so a path computed from this module's own
+ * location is correct in the source tree and one directory too shallow once
+ * bundled. That produced a plist pointing at a file that does not exist — the
+ * worst failure available here, because the timer then fails silently while
+ * `watch status` still reports it installed.
+ */
+function entryPoint(): string {
+  const argv = process.argv[1];
+  if (!argv) throw new Error('Cannot determine which script to schedule.');
+  return resolve(argv);
+}
+
 function plist(intervalMinutes: number): string {
   const node = process.execPath;
-  const entry = join(
-    dirname(new URL(import.meta.url).pathname),
-    '..',
-    '..',
-    'dist',
-    'index.js'
-  );
+  const entry = entryPoint();
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -140,10 +150,18 @@ async function main(argv: readonly string[]): Promise<number> {
             '(1 hour) and burn free-tier quota. Check `provider_status` after a day.'
         );
       }
+      const entry = entryPoint();
+      if (!existsSync(entry)) {
+        say(`Refusing to install: ${entry} does not exist.`);
+        say('Run `pnpm build` first, or install the package globally.');
+        return 1;
+      }
+
       const path = plistPath();
       mkdirSync(dirname(path), { recursive: true });
       writeFileSync(path, plist(minutes));
       say(`Wrote ${path}`);
+      say(`  runs: ${process.execPath} ${entry} watch run`);
       say('Load it with:  launchctl load -w ' + path);
       say(
         `Alarm latency will be about ${minutes} minutes. That is what free price tiers buy.`

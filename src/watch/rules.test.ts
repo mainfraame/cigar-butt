@@ -200,3 +200,48 @@ describe('isLikelyMarketHours', () => {
     expect(isLikelyMarketHours(new Date('2026-01-05T20:55:00Z'))).toBe(true);
   });
 });
+
+describe('installed-path regression', () => {
+  it('schedules the script actually running, not one derived from module layout', async () => {
+    // A path computed from import.meta.url is correct in the source tree and
+    // one directory too shallow once bundled, which produced a plist pointing
+    // at a file that did not exist. The timer then fails silently while
+    // `watch status` still reports it installed — the worst failure here.
+    const { readFileSync, rmSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const { tmpdir } = await import('node:os');
+    const { existsSync, mkdtempSync, writeFileSync } = await import('node:fs');
+
+    const dir = mkdtempSync(join(tmpdir(), 'cb-plist-'));
+    const script = join(dir, 'index.js');
+    writeFileSync(script, '// stand-in for the bundled entry point\n');
+
+    const savedArgv = process.argv[1];
+    const savedHome = process.env.HOME;
+    process.argv[1] = script;
+    process.env.HOME = dir;
+
+    try {
+      const { runWatchCli } = await import('./cli.ts');
+      await runWatchCli(['install']);
+
+      const plist = join(
+        dir,
+        'Library',
+        'LaunchAgents',
+        'dev.cigar-butt.watch.plist'
+      );
+      expect(existsSync(plist)).toBe(true);
+
+      const scheduled = /<string>(\/[^<]*index\.js)<\/string>/.exec(
+        readFileSync(plist, 'utf8')
+      )?.[1];
+      expect(scheduled).toBe(script);
+      expect(existsSync(scheduled ?? '')).toBe(true);
+    } finally {
+      if (savedArgv !== undefined) process.argv[1] = savedArgv;
+      if (savedHome !== undefined) process.env.HOME = savedHome;
+      rmSync(dir, { force: true, recursive: true });
+    }
+  });
+});
