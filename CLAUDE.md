@@ -76,8 +76,16 @@ pnpm 11+ reads its supply-chain settings from there rather than `.npmrc`.
   Catches a split between the balance-sheet date and today, which silently makes
   every per-share figure wrong by the split factor.
 - `src/data/etrade.ts` — E*TRADE OAuth 1.0a (hand-signed on `node:crypto`, no
-  dependency), accounts, balances and positions. Read-only; this server never
-  places an order.
+  dependency), accounts, balances, positions and transactions. Read-only; this
+  server never places an order. **Every credential is stored per environment**
+  (`ETRADE_SANDBOX_*` / `ETRADE_PROD_*`), tokens included — the two sides are
+  not interchangeable, and sharing one slot means a toggle silently signs
+  production requests with sandbox material.
+- `src/data/congress.ts` — Senate eFD periodic and annual disclosures (HTML
+  tables, session-cookie flow), the House Clerk's filing index (XML), and
+  committee rosters from `unitedstates/congress-legislators`. No credential.
+  Sits outside the Graham/Schloss method: amounts are bands reported weeks
+  late, so nothing here feeds the screen.
 - `src/setup/report.ts` — renders the credential picture as text, generated from
   the provider registry so it cannot drift from what the code reads. Includes
   `startupBanner`, written to **stderr** at boot — stdout is the protocol, and
@@ -87,9 +95,11 @@ pnpm 11+ reads its supply-chain settings from there rather than `.npmrc`.
   (`check_disqualifiers`, `analyze_ticker`, `get_quotes`), `market.ts`
   (`macro_context`, `bank_call_report`, `check_corporate_actions`,
   `short_interest`), `portfolio.ts` (`build_allocation`, `plan_rebalance`,
-  `screen_market`), `broker.ts` (`etrade_connect`, `etrade_accounts`,
-  `etrade_positions`, `etrade_disconnect`), `cache.ts` (`cache_status`,
-  `cache_clear`). `shared.ts` holds `text`, `failure`, `requireSetup`,
+  `screen_market`), `broker.ts` (`etrade_connect`, `etrade_environment`,
+  `etrade_accounts`, `etrade_balances`, `etrade_positions`,
+  `etrade_transactions`, `etrade_disconnect`), `congress.ts`
+  (`congress_trades`, `congress_member_profile`, `congress_house_filings`),
+  `cache.ts` (`cache_status`, `cache_clear`). `shared.ts` holds `text`, `failure`, `requireSetup`,
   `attempt`, the cell formatters and `DISCLAIMER`.
 
 Data flows one way: `config` → `http` → `data` → `analysis` → `portfolio` →

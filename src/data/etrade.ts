@@ -4,7 +4,7 @@ import { createHmac, randomBytes } from 'node:crypto';
 import { cached } from '../cache/store.ts';
 import { getCredential, saveCredentials } from '../config/store.ts';
 import { fetchJson } from '../http/client.ts';
-import { dec, ZERO } from '../math/decimal.ts';
+import { dec, sum, ZERO } from '../math/decimal.ts';
 
 import type { Decimal } from '../math/decimal.ts';
 
@@ -41,13 +41,41 @@ export interface EtradeAccount {
 }
 
 interface EtradeBalance {
+  /** Total equity plus cash, per E*TRADE's real-time valuation. */
+  readonly accountBalance: Decimal | undefined;
+  readonly accountDescription: string | undefined;
   readonly accountIdKey: string;
-  /** ISO date the figures are as of. */
+  readonly accountType: string | undefined;
+  /** ISO date the figures are as of, from E*TRADE's own `asOfDate`. */
   readonly asOf: string;
-  /** Cash available to deploy, not total cash: settled and unencumbered. */
+  /** Cash available to deploy: settled and unencumbered. Not total cash. */
   readonly cash: Decimal;
+  readonly cashBalance: Decimal | undefined;
+  readonly cashBuyingPower: Decimal | undefined;
+  readonly cashForWithdrawal: Decimal | undefined;
+  readonly marginBalance: Decimal | undefined;
+  readonly marginBuyingPower: Decimal | undefined;
   readonly netCash: Decimal | undefined;
+  /** Market value of long positions. */
+  readonly netMarketValue: Decimal | undefined;
+  /** Unmet margin calls, if any. Non-zero here outranks every other figure. */
+  readonly openCalls: Decimal | undefined;
+  readonly settledCash: Decimal | undefined;
   readonly totalValue: Decimal | undefined;
+  readonly unsettledCash: Decimal | undefined;
+}
+
+export interface EtradeTransaction {
+  readonly amount: Decimal | undefined;
+  readonly description: string;
+  readonly fee: Decimal | undefined;
+  readonly postDate: string | undefined;
+  readonly price: Decimal | undefined;
+  readonly quantity: Decimal | undefined;
+  readonly symbol: string | undefined;
+  readonly transactionDate: string;
+  readonly transactionId: string;
+  readonly transactionType: string;
 }
 
 export interface EtradePortfolio {
@@ -60,23 +88,83 @@ export interface EtradePortfolio {
 
 /** Convertible to `Holding` by dropping everything but asOf/price/shares/ticker. */
 interface EtradePosition {
-  /** ISO date of the last trade the mark came from. */
   readonly asOf: string;
+  readonly daysGain: Decimal | undefined;
   readonly marketValue: Decimal | undefined;
+  readonly pctOfPortfolio: Decimal | undefined;
   readonly price: Decimal;
+  readonly pricePaid: Decimal | undefined;
   readonly shares: Decimal;
   readonly ticker: string;
   readonly totalCost: Decimal | undefined;
   readonly totalGain: Decimal | undefined;
+  readonly totalGainPct: Decimal | undefined;
 }
 
-const ENV_ACCESS_SECRET = 'ETRADE_ACCESS_TOKEN_SECRET';
-const ENV_ACCESS_TOKEN = 'ETRADE_ACCESS_TOKEN';
-const ENV_CONSUMER_KEY = 'ETRADE_CONSUMER_KEY';
-const ENV_CONSUMER_SECRET = 'ETRADE_CONSUMER_SECRET';
+/**
+ * Credential names.
+ *
+ * Everything except the environment selector is stored twice, once per
+ * environment. E*TRADE's two key pairs are not interchangeable and neither are
+ * the access tokens minted from them — a sandbox token is rejected by
+ * production even when sent to the right host. Sharing one slot between them
+ * means a toggle silently signs production requests with sandbox material,
+ * which fails in a way that reads like a bad key rather than a wrong mode.
+ *
+ * The unscoped names are still read as a fallback, so an existing single-pair
+ * setup keeps working.
+ */
 const ENV_ENVIRONMENT = 'ETRADE_ENVIRONMENT';
-const ENV_REQUEST_SECRET = 'ETRADE_REQUEST_TOKEN_SECRET';
-const ENV_REQUEST_TOKEN = 'ETRADE_REQUEST_TOKEN';
+const ENV_ENVIRONMENT_ALIAS = 'ETRADE_ENV';
+
+const UNSCOPED = {
+  accessSecret: 'ETRADE_ACCESS_TOKEN_SECRET',
+  accessToken: 'ETRADE_ACCESS_TOKEN',
+  consumerKey: 'ETRADE_CONSUMER_KEY',
+  consumerSecret: 'ETRADE_CONSUMER_SECRET',
+  requestSecret: 'ETRADE_REQUEST_TOKEN_SECRET',
+  requestToken: 'ETRADE_REQUEST_TOKEN'
+} as const;
+
+const SUFFIX = {
+  accessSecret: 'ACCESS_TOKEN_SECRET',
+  accessToken: 'ACCESS_TOKEN',
+  consumerKey: 'CONSUMER_KEY',
+  consumerSecret: 'CONSUMER_SECRET',
+  requestSecret: 'REQUEST_TOKEN_SECRET',
+  requestToken: 'REQUEST_TOKEN'
+} as const;
+
+type CredentialSlot = keyof typeof SUFFIX;
+
+/** The environment-scoped variable name for a slot, e.g. ETRADE_PROD_ACCESS_TOKEN. */
+export function scopedName(
+  slot: CredentialSlot,
+  env: EtradeEnvironment = environment()
+): string {
+  return `ETRADE_${env === 'sandbox' ? 'SANDBOX' : 'PROD'}_${SUFFIX[slot]}`;
+}
+
+/** Scoped value if present, else the unscoped fallback. */
+function slotValue(
+  slot: CredentialSlot,
+  env: EtradeEnvironment = environment()
+): string | undefined {
+  return getCredential(scopedName(slot, env)) ?? getCredential(UNSCOPED[slot]);
+}
+
+/**
+ * Writes a slot under its scoped name. Tokens minted in one environment must
+ * never leak into the other, so writes are always scoped even when the value
+ * that produced them was read from an unscoped fallback.
+ */
+function writeSlot(values: Partial<Record<CredentialSlot, string>>): void {
+  const payload: Record<string, string> = {};
+  for (const [slot, value] of Object.entries(values)) {
+    payload[scopedName(slot as CredentialSlot)] = value;
+  }
+  saveCredentials(payload);
+}
 
 /**
  * Balances and positions are marks, not filings: five minutes is long enough to
@@ -253,10 +341,50 @@ export function environment(): EtradeEnvironment {
   // `ETRADE_ENV` is accepted as an alias because it is the shorter name people
   // reach for in a shell rc, and getting this wrong silently signs production
   // requests with a sandbox key.
-  const raw = (getCredential(ENV_ENVIRONMENT) ?? getCredential('ETRADE_ENV'))
+  const raw = (
+    getCredential(ENV_ENVIRONMENT) ?? getCredential(ENV_ENVIRONMENT_ALIAS)
+  )
     ?.trim()
     .toLowerCase();
   return raw === 'sandbox' ? 'sandbox' : 'production';
+}
+
+/**
+ * Switches the active environment and persists the choice.
+ *
+ * Returns the name of a shell variable that will override the stored value, if
+ * one is exported. Environment variables win over the credential file by
+ * design, so an `ETRADE_ENV` left in a shell rc makes this call look like it
+ * did nothing — the caller needs to be able to say so rather than report a
+ * switch that will not survive the next process.
+ */
+export function setEnvironment(next: EtradeEnvironment): {
+  shadowedBy?: string;
+} {
+  saveCredentials({ [ENV_ENVIRONMENT]: next });
+
+  for (const name of [ENV_ENVIRONMENT, ENV_ENVIRONMENT_ALIAS]) {
+    const exported = process.env[name]?.trim().toLowerCase();
+    if (exported && exported !== next) return { shadowedBy: name };
+  }
+  return {};
+}
+
+/** Which environments have a usable consumer key pair. */
+export function configuredEnvironments(): {
+  env: EtradeEnvironment;
+  hasConsumer: boolean;
+  hasToken: boolean;
+}[] {
+  return (['sandbox', 'production'] as const).map(env => ({
+    env,
+    hasConsumer:
+      slotValue('consumerKey', env) !== undefined &&
+      slotValue('consumerSecret', env) !== undefined,
+    hasToken:
+      slotValue('accessToken', env) !== undefined &&
+      slotValue('accessSecret', env) !== undefined
+  }));
 }
 
 function apiBase(): string {
@@ -277,48 +405,37 @@ function required(envVar: string, label: string): string {
 }
 
 /**
- * Resolves the consumer key pair.
+ * Resolves the consumer key pair for whichever environment is active.
  *
- * E*TRADE issues two independent pairs and they are not interchangeable — a
- * sandbox token is rejected by production even if you send it to the right
- * host. Most people therefore hold both at once, so the environment-scoped
- * names are checked before the unscoped ones and the pair can be switched with
- * `ETRADE_ENV` alone rather than by re-exporting keys.
+ * Half a pair is treated as an error rather than falling through to the other
+ * environment's key: mixing a sandbox key with a production secret produces a
+ * signature failure that looks exactly like a revoked key.
  */
-function scopedVar(suffix: string): string {
-  return environment() === 'sandbox'
-    ? `ETRADE_SANDBOX_${suffix}`
-    : `ETRADE_PROD_${suffix}`;
-}
-
 function consumer(): { key: string; secret: string } {
-  const scopedKey = getCredential(scopedVar('CONSUMER_KEY'));
-  const scopedSecret = getCredential(scopedVar('CONSUMER_SECRET'));
-  if (scopedKey && scopedSecret) {
-    return { key: scopedKey, secret: scopedSecret };
-  }
+  const key = slotValue('consumerKey');
+  const secret = slotValue('consumerSecret');
+  if (key && secret) return { key, secret };
 
-  if (scopedKey || scopedSecret) {
+  if (key || secret) {
     throw new Error(
       `Only half of the ${environment()} E*TRADE key pair is set. Both ` +
-        `${scopedVar('CONSUMER_KEY')} and ${scopedVar('CONSUMER_SECRET')} are needed.`
+        `${scopedName('consumerKey')} and ${scopedName('consumerSecret')} are needed.`
     );
   }
 
-  return {
-    key: required(ENV_CONSUMER_KEY, `E*TRADE ${environment()} consumer key`),
-    secret: required(
-      ENV_CONSUMER_SECRET,
-      `E*TRADE ${environment()} consumer secret`
-    )
-  };
+  throw new Error(
+    `No E*TRADE ${environment()} consumer key is configured. Set ` +
+      `${scopedName('consumerKey')} and ${scopedName('consumerSecret')}, or run ` +
+      '`setup_credentials`. Use `etrade_environment` to switch environments. ' +
+      'Keys: https://developer.etrade.com/getting-started'
+  );
 }
 
 /** Whether an access token is on hand. Says nothing about whether it still works. */
 export function hasAccessToken(): boolean {
   return (
-    getCredential(ENV_ACCESS_TOKEN) !== undefined &&
-    getCredential(ENV_ACCESS_SECRET) !== undefined
+    slotValue('accessToken') !== undefined &&
+    slotValue('accessSecret') !== undefined
   );
 }
 
@@ -337,8 +454,11 @@ function accessIdentity(): OAuthIdentity {
   return {
     consumerKey: key,
     consumerSecret: secret,
-    token: required(ENV_ACCESS_TOKEN, 'E*TRADE access token'),
-    tokenSecret: required(ENV_ACCESS_SECRET, 'E*TRADE access token secret')
+    token: required(scopedName('accessToken'), 'E*TRADE access token'),
+    tokenSecret: required(
+      scopedName('accessSecret'),
+      'E*TRADE access token secret'
+    )
   };
 }
 
@@ -361,10 +481,7 @@ export async function startAuthorization(): Promise<string> {
   });
 
   const pair = parseTokenPair(body);
-  saveCredentials({
-    [ENV_REQUEST_SECRET]: pair.secret,
-    [ENV_REQUEST_TOKEN]: pair.token
-  });
+  writeSlot({ requestSecret: pair.secret, requestToken: pair.token });
 
   // E*TRADE's authorize page wants the raw consumer key and a percent-encoded
   // token; a token passed through unencoded breaks on its `+` characters.
@@ -378,8 +495,8 @@ export async function startAuthorization(): Promise<string> {
  */
 export async function completeAuthorization(verifier: string): Promise<void> {
   const { key, secret } = consumer();
-  const requestToken = getCredential(ENV_REQUEST_TOKEN);
-  const requestSecret = getCredential(ENV_REQUEST_SECRET);
+  const requestToken = slotValue('requestToken');
+  const requestSecret = slotValue('requestSecret');
   if (!requestToken || !requestSecret) {
     throw new Error(
       'No pending E*TRADE authorization. Call `etrade_connect` with no verifier ' +
@@ -396,11 +513,11 @@ export async function completeAuthorization(verifier: string): Promise<void> {
   });
 
   const pair = parseTokenPair(body);
-  saveCredentials({
-    [ENV_ACCESS_SECRET]: pair.secret,
-    [ENV_ACCESS_TOKEN]: pair.token,
-    [ENV_REQUEST_SECRET]: '',
-    [ENV_REQUEST_TOKEN]: ''
+  writeSlot({
+    accessSecret: pair.secret,
+    accessToken: pair.token,
+    requestSecret: '',
+    requestToken: ''
   });
   touch();
   startKeepAlive();
@@ -473,7 +590,10 @@ export async function revokeAccessToken(): Promise<boolean> {
     accessIdentity()
   );
   stopKeepAlive();
-  saveCredentials({ [ENV_ACCESS_SECRET]: '', [ENV_ACCESS_TOKEN]: '' });
+  writeSlot({ accessSecret: '', accessToken: '' });
+  // The unscoped fallbacks would otherwise resurrect a token the user just
+  // revoked, since slotValue reads them when the scoped slot is empty.
+  saveCredentials({ [UNSCOPED.accessSecret]: '', [UNSCOPED.accessToken]: '' });
   return true;
 }
 
@@ -486,7 +606,8 @@ async function get<T>(
   const url = `${apiBase()}${path}`;
   const identity = accessIdentity();
   startKeepAlive();
-  return cached(namespace, `${environment()}${path}`, TTL_BROKER, async () => {
+  const key = `${environment()}${path}?${new URLSearchParams(searchParams).toString()}`;
+  return cached(namespace, key, TTL_BROKER, async () => {
     const payload = await fetchJson<T>(url, {
       headers: {
         authorization: authorization('GET', url, searchParams, identity)
@@ -508,14 +629,68 @@ interface AccountListResponse {
   };
 }
 
+type Num = number | string | undefined;
+
+interface RawComputed {
+  accountBalance?: Num;
+  cashAvailableForInvestment?: Num;
+  cashAvailableForWithdrawal?: Num;
+  cashBalance?: Num;
+  cashBuyingPower?: Num;
+  marginBalance?: Num;
+  marginBuyingPower?: Num;
+  netCash?: Num;
+  OpenCalls?: {
+    cashCall?: Num;
+    fedCall?: Num;
+    houseCall?: Num;
+    minEquityCall?: Num;
+  };
+  openCalls?: RawComputed['OpenCalls'];
+  RealTimeValues?: { netMvLong?: Num; totalAccountValue?: Num };
+  realTimeValues?: { netMvLong?: Num; totalAccountValue?: Num };
+  settledCashForInvestment?: Num;
+  unSettledCashForInvestment?: Num;
+}
+
 interface BalanceResponse {
   BalanceResponse?: {
-    Computed?: {
-      cashAvailableForInvestment?: number | string;
-      netCash?: number | string;
-      RealTimeValues?: { totalAccountValue?: number | string };
-      totalAccountValue?: number | string;
-    };
+    accountDescription?: string;
+    accountType?: string;
+    asOfDate?: number;
+    // E*TRADE returns the computed block as `Computed`; the schema calls it
+    // `computedBalance`. Accept both rather than depend on which one ships.
+    Computed?: RawComputed;
+    computedBalance?: RawComputed;
+  };
+}
+
+interface RawTransaction {
+  amount?: Num;
+  brokerage?: RawBrokerage;
+  Brokerage?: RawBrokerage;
+  description?: string;
+  postDate?: number | string;
+  transactionDate?: number | string;
+  transactionId?: number | string;
+  transactionType?: string;
+}
+
+interface RawBrokerage {
+  displaySymbol?: string;
+  fee?: Num;
+  price?: Num;
+  product?: { symbol?: string };
+  Product?: { symbol?: string };
+  quantity?: Num;
+  settlementDate?: number | string;
+}
+
+interface TransactionListResponse {
+  TransactionListResponse?: {
+    moreTransactions?: boolean;
+    totalCount?: number;
+    Transaction?: RawTransaction | RawTransaction[];
   };
 }
 
@@ -540,12 +715,16 @@ interface RawAccountPortfolio {
 }
 
 interface RawPosition {
-  marketValue?: number | string;
+  daysGain?: Num;
+  marketValue?: Num;
+  pctOfPortfolio?: Num;
+  pricePaid?: Num;
   Product?: { securityType?: string; symbol?: string };
-  quantity?: number | string;
-  Quick?: { lastTrade?: number | string; lastTradeTime?: number };
-  totalCost?: number | string;
-  totalGain?: number | string;
+  quantity?: Num;
+  Quick?: { lastTrade?: Num; lastTradeTime?: number };
+  totalCost?: Num;
+  totalGain?: Num;
+  totalGainPct?: Num;
 }
 
 /** E*TRADE collapses one-element arrays into the object itself. */
@@ -556,16 +735,26 @@ function list<T>(value: T | T[] | undefined): T[] {
 
 const today = (): string => new Date().toISOString().slice(0, 10);
 
-/** `lastTradeTime` is epoch seconds; anything else is not a usable mark date. */
-function markDate(seconds: number | undefined): string {
+/**
+ * E*TRADE stamps times as epoch seconds on some endpoints and milliseconds on
+ * others, with no flag distinguishing them. Anything past the year 2001 in
+ * seconds is beyond plausible as a *second* count for a market timestamp, so
+ * the magnitude is the discriminator. A value that is neither is not a usable
+ * date, and today() is the honest fallback.
+ */
+const EPOCH_MS_THRESHOLD = 1e11;
+
+function markDate(value: number | string | undefined): string {
+  const numeric = typeof value === 'string' ? Number(value) : value;
   if (
-    typeof seconds !== 'number' ||
-    !Number.isFinite(seconds) ||
-    seconds <= 0
+    typeof numeric !== 'number' ||
+    !Number.isFinite(numeric) ||
+    numeric <= 0
   ) {
     return today();
   }
-  return new Date(seconds * 1000).toISOString().slice(0, 10);
+  const ms = numeric > EPOCH_MS_THRESHOLD ? numeric : numeric * 1000;
+  return new Date(ms).toISOString().slice(0, 10);
 }
 
 export async function listAccounts(): Promise<EtradeAccount[]> {
@@ -594,15 +783,109 @@ export async function accountBalance(
     { instType: 'BROKERAGE', realTimeNAV: 'true' }
   );
 
-  const computed = data.BalanceResponse?.Computed;
+  const body = data.BalanceResponse;
+  const computed = body?.Computed ?? body?.computedBalance;
+  const realTime = computed?.RealTimeValues ?? computed?.realTimeValues;
+  const calls = computed?.OpenCalls ?? computed?.openCalls;
+
+  // Any unmet call outranks every other figure on the page, so collapse the
+  // four kinds into one number the caller cannot miss.
+  const openCalls = sum(
+    dec(calls?.cashCall),
+    dec(calls?.fedCall),
+    dec(calls?.houseCall),
+    dec(calls?.minEquityCall)
+  );
+
   return {
+    accountBalance: dec(computed?.accountBalance),
+    accountDescription: body?.accountDescription,
     accountIdKey,
-    asOf: today(),
+    accountType: body?.accountType,
+    // E*TRADE stamps its own `asOfDate` (epoch seconds). Falling back to today
+    // would claim a freshness the response never promised.
+    asOf: body?.asOfDate ? markDate(body.asOfDate) : today(),
     cash: dec(computed?.cashAvailableForInvestment) ?? ZERO,
+    cashBalance: dec(computed?.cashBalance),
+    cashBuyingPower: dec(computed?.cashBuyingPower),
+    cashForWithdrawal: dec(computed?.cashAvailableForWithdrawal),
+    marginBalance: dec(computed?.marginBalance),
+    marginBuyingPower: dec(computed?.marginBuyingPower),
     netCash: dec(computed?.netCash),
-    totalValue:
-      dec(computed?.RealTimeValues?.totalAccountValue) ??
-      dec(computed?.totalAccountValue)
+    netMarketValue: dec(realTime?.netMvLong),
+    openCalls,
+    settledCash: dec(computed?.settledCashForInvestment),
+    totalValue: dec(realTime?.totalAccountValue),
+    unsettledCash: dec(computed?.unSettledCashForInvestment)
+  };
+}
+
+/** MMDDYYYY is the only date format the transactions endpoint accepts. */
+function asEtradeDate(iso: string | undefined): string | undefined {
+  if (!iso) return undefined;
+  const [year, month, day] = iso.split('-');
+  return year && month && day ? `${month}${day}${year}` : undefined;
+}
+
+/**
+ * Transactions for one account. E*TRADE keeps two years and pages at 50.
+ *
+ * Dates go out as MMDDYYYY, which is the only format the endpoint accepts, and
+ * come back as epoch seconds. Both conversions live here so no caller has to
+ * think about it.
+ */
+export async function listTransactions(
+  accountIdKey: string,
+  {
+    count = 50,
+    endDate,
+    startDate
+  }: { count?: number; endDate?: string; startDate?: string } = {}
+): Promise<{ more: boolean; transactions: EtradeTransaction[] }> {
+  const params: Record<string, string> = { count: String(count) };
+  const from = asEtradeDate(startDate);
+  const to = asEtradeDate(endDate);
+  if (from) params['startDate'] = from;
+  if (to) params['endDate'] = to;
+
+  let data: TransactionListResponse;
+  try {
+    data = await get<TransactionListResponse>(
+      'etrade-transactions',
+      `/v1/accounts/${encodeURIComponent(accountIdKey)}/transactions.json`,
+      params
+    );
+  } catch (error) {
+    // No transactions in the window answers 204 with no body.
+    if (!(error instanceof SyntaxError)) throw error;
+    data = {};
+  }
+
+  const body = data.TransactionListResponse;
+  const transactions = list(body?.Transaction).map(raw => {
+    const brokerage = raw.Brokerage ?? raw.brokerage;
+    return {
+      amount: dec(raw.amount),
+      description: raw.description?.trim() ?? '',
+      fee: dec(brokerage?.fee),
+      postDate: raw.postDate ? markDate(raw.postDate) : undefined,
+      price: dec(brokerage?.price),
+      quantity: dec(brokerage?.quantity),
+      symbol:
+        brokerage?.displaySymbol?.trim() ??
+        (brokerage?.Product ?? brokerage?.product)?.symbol?.trim(),
+      transactionDate: raw.transactionDate ? markDate(raw.transactionDate) : '',
+      transactionId: String(raw.transactionId ?? ''),
+      transactionType: raw.transactionType?.trim() ?? ''
+    };
+  });
+
+  return {
+    more: body?.moreTransactions === true,
+    transactions: sortBy(
+      transactions,
+      item => item.transactionDate
+    ).toReversed()
   };
 }
 
@@ -642,12 +925,16 @@ export async function portfolioPositions(
     return [
       {
         asOf: markDate(position.Quick?.lastTradeTime),
+        daysGain: dec(position.daysGain),
         marketValue: dec(position.marketValue),
+        pctOfPortfolio: dec(position.pctOfPortfolio),
         price,
+        pricePaid: dec(position.pricePaid),
         shares,
         ticker,
         totalCost: dec(position.totalCost),
-        totalGain: dec(position.totalGain)
+        totalGain: dec(position.totalGain),
+        totalGainPct: dec(position.totalGainPct)
       }
     ];
   });

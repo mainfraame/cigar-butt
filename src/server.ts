@@ -4,6 +4,7 @@ import { loadEnvFile, setupReport } from './config/store.ts';
 import { renderSetup, startupBanner } from './setup/report.ts';
 import { registerBrokerTools } from './tools/broker.ts';
 import { registerCacheTools } from './tools/cache.ts';
+import { registerCongressTools } from './tools/congress.ts';
 import { registerMarketTools } from './tools/market.ts';
 import { registerPortfolioTools } from './tools/portfolio.ts';
 import { registerResearchTools } from './tools/research.ts';
@@ -98,6 +99,7 @@ export function createServer(): McpServer {
   registerMarketTools(server);
   registerPortfolioTools(server);
   registerBrokerTools(server);
+  registerCongressTools(server);
   registerCacheTools(server);
 
   return server;

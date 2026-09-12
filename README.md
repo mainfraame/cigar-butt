@@ -128,9 +128,16 @@ Legal first. You need an E*TRADE account, but it does **not** have to be funded 
 funding is only required to trade. An individual key is locked to the user ID
 that created it.
 
-Set `ETRADE_ENV` to `sandbox` or `production`. You can hold both pairs at once:
-`ETRADE_SANDBOX_CONSUMER_KEY` and `ETRADE_PROD_CONSUMER_KEY` (with matching
-`_SECRET`) are read before the unscoped names, so switching is one variable.
+Store both pairs at once as `ETRADE_SANDBOX_CONSUMER_KEY` /
+`ETRADE_PROD_CONSUMER_KEY` (with matching `_SECRET`), and switch with the
+`etrade_environment` tool. Access tokens are stored per environment too, so
+connecting one does not disconnect the other and a sandbox token can never be
+sent to production.
+
+Prefer the server's own 0600 credential file over exporting these in a shell rc:
+an export is inherited by every process you launch, and an exported `ETRADE_ENV`
+overrides the stored setting, which makes the toggle look broken.
+`setup_status` reports which source each value came from.
 
 Then run `etrade_connect`. It returns a URL, E*TRADE shows a short verifier code,
 and you paste it back. No browser redirect is involved, so nothing needs to
@@ -175,12 +182,28 @@ server at an existing dotenv file instead, set `CIGAR_BUTT_ENV_FILE`. See
 
 Read-only. This server never places an order.
 
-| Tool                | What it does                                                                           |
-| ------------------- | -------------------------------------------------------------------------------------- |
-| `etrade_connect`    | OAuth handshake with E*TRADE. Returns a URL to open; you paste back the verifier code  |
-| `etrade_accounts`   | List accounts and their account ID keys                                                |
-| `etrade_positions`  | Holdings and cash for one account, emitted in exactly the shape `plan_rebalance` takes |
-| `etrade_disconnect` | Revoke and delete the stored access token                                              |
+| Tool                  | What it does                                                                                                                                     |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `etrade_connect`      | OAuth handshake with E*TRADE. Returns a URL to open; you paste back the verifier code                                                            |
+| `etrade_accounts`     | List accounts and their account ID keys                                                                                                          |
+| `etrade_positions`    | Holdings and cash for one account, emitted in exactly the shape `plan_rebalance` takes                                                           |
+| `etrade_environment`  | Show or switch between sandbox and production. Both key pairs and both access tokens are stored separately, so switching never mixes credentials |
+| `etrade_balances`     | Cash available, settled vs unsettled, buying power, margin balance, open margin calls                                                            |
+| `etrade_transactions` | Trade, dividend, transfer and fee history as a table                                                                                             |
+| `etrade_disconnect`   | Revoke and delete the stored access token                                                                                                        |
+
+### Congressional disclosures
+
+Outside the Graham/Schloss method, and the output says so: disclosures are
+banded amounts reported weeks late, so they can never be a figure the screen
+acts on. What they are good for is context — and the committee cross-reference
+is the part carrying real information. No credential needed.
+
+| Tool                      | What it does                                                                                                                  |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `congress_trades`         | Senate transactions from official eFD reports, cross-referenced against current committee assignments                         |
+| `congress_member_profile` | A senator's committees, board seats and outside positions, plus every employer paying the household — self, spouse or child   |
+| `congress_house_filings`  | House transaction-report filings with PDF links. Filing records only: House disclosures are PDFs, many of them scanned images |
 
 ### Portfolio
 

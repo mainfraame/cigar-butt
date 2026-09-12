@@ -6,9 +6,15 @@
 export interface FetchJsonOptions {
   /** JSON request body. Implies POST unless `method` says otherwise. */
   readonly body?: unknown;
+  /** Cookie jar, read and written in place. Enables session-based sources. */
+  readonly cookies?: Map<string, string>;
+  /** Form-encoded body. Mutually exclusive with `body`; implies POST. */
+  readonly form?: Readonly<Record<string, string>>;
   readonly headers?: Readonly<Record<string, string>>;
   readonly method?: 'GET' | 'POST';
   /** Requests per second permitted against this host. */
+  /** `text` returns the raw body; the default parses JSON. */
+  readonly parse?: 'json' | 'text';
   readonly rateKey: string;
   readonly requestsPerSecond: number;
   readonly searchParams?: Readonly<Record<string, string | undefined>>;
@@ -55,6 +61,22 @@ export function redactUrl(url: URL): string {
   return copy.toString();
 }
 
+/** Merges a response's Set-Cookie headers into the jar. */
+function absorbCookies(response: Response, jar: Map<string, string>): void {
+  // getSetCookie keeps the headers separate. A joined `set-cookie` string
+  // cannot be split reliably, because Expires attributes contain commas.
+  for (const header of response.headers.getSetCookie()) {
+    const [pair] = header.split(';');
+    const index = pair?.indexOf('=') ?? -1;
+    if (!pair || index <= 0) continue;
+    jar.set(pair.slice(0, index).trim(), pair.slice(index + 1).trim());
+  }
+}
+
+function serialiseCookies(jar: Map<string, string>): string {
+  return [...jar].map(([name, value]) => `${name}=${value}`).join('; ');
+}
+
 /** Serialises requests to one host at the configured rate. */
 async function throttle(key: string, requestsPerSecond: number): Promise<void> {
   const interval = 1000 / requestsPerSecond;
@@ -75,9 +97,16 @@ export async function fetchJson<T>(
   }
 
   const method =
-    options.method ?? (options.body === undefined ? 'GET' : 'POST');
-  const payload =
-    options.body === undefined ? undefined : JSON.stringify(options.body);
+    options.method ??
+    (options.body === undefined && options.form === undefined ? 'GET' : 'POST');
+  const payload = options.form
+    ? new URLSearchParams(options.form).toString()
+    : options.body === undefined
+      ? undefined
+      : JSON.stringify(options.body);
+  const contentType = options.form
+    ? 'application/x-www-form-urlencoded'
+    : 'application/json';
 
   let lastError: unknown;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
@@ -89,14 +118,19 @@ export async function fetchJson<T>(
         body: payload,
         headers: {
           accept: 'application/json',
-          ...(payload === undefined
-            ? {}
-            : { 'content-type': 'application/json' }),
+          ...(payload === undefined ? {} : { 'content-type': contentType }),
+          ...(options.cookies && options.cookies.size > 0
+            ? { cookie: serialiseCookies(options.cookies) }
+            : {}),
           ...options.headers
         },
         method,
+        // A session source hands out its token on a redirect, so the jar has to
+        // see every hop rather than only the final response.
+        redirect: options.cookies ? 'manual' : 'follow',
         signal: options.signal
       });
+      if (options.cookies) absorbCookies(response, options.cookies);
     } catch (error) {
       lastError = error;
       if (attempt === MAX_ATTEMPTS) break;
@@ -104,7 +138,16 @@ export async function fetchJson<T>(
       continue;
     }
 
-    if (response.ok) return (await response.json()) as T;
+    // With manual redirects a 302 is a successful hop, not a failure — the
+    // caller wanted the cookies it carried, and there is no body to parse.
+    if (options.cookies && response.status >= 300 && response.status < 400) {
+      return undefined as T;
+    }
+    if (response.ok) {
+      return options.parse === 'text'
+        ? ((await response.text()) as T)
+        : ((await response.json()) as T);
+    }
 
     const body = await response.text().catch(() => '');
     const error = new HttpError(response.status, redactUrl(url), body);
@@ -125,4 +168,22 @@ export async function fetchJson<T>(
   throw lastError instanceof Error
     ? lastError
     : new Error(`Request to ${redactUrl(url)} failed`);
+}
+
+/**
+ * The same path as {@link fetchJson}, for sources that answer with HTML.
+ *
+ * A thin wrapper rather than a second implementation, so rate limiting, retries
+ * and credential redaction stay in one place — a source that bypassed them
+ * would be the one that gets an IP blocked.
+ */
+export function fetchText(
+  baseUrl: string,
+  options: FetchJsonOptions
+): Promise<string> {
+  return fetchJson<string>(baseUrl, {
+    ...options,
+    headers: { accept: 'text/html,application/xhtml+xml', ...options.headers },
+    parse: 'text'
+  });
 }

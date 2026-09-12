@@ -56,6 +56,14 @@ export function div(
   return numerator.div(denominator);
 }
 
+/** Sums the defined operands; undefined when nothing was defined. */
+export function sum(...values: (Decimal | undefined)[]): Decimal | undefined {
+  const present = values.filter((v): v is Decimal => v !== undefined);
+  return present.length === 0
+    ? undefined
+    : present.reduce((total, v) => total.plus(v), ZERO);
+}
+
 /**
  * Serialises a Decimal for a tool response. Ratios and per-share figures are
  * rounded for legibility; the caller picks the scale.

@@ -30,7 +30,34 @@ const credentialForm = z.object({
     .string()
     .optional()
     .meta({ title: 'Alpha Vantage API key (optional)' }),
-  BLS_API_KEY: z.string().optional().meta({ title: 'BLS API key (optional)' }),
+  ETRADE_PROD_CONSUMER_KEY: z
+    .string()
+    .optional()
+    .meta({
+      description:
+        'Reads your real holdings, balances and transactions. Read-only — this ' +
+        'server never places an order. Obtain at ' +
+        'https://developer.etrade.com/getting-started; `setup_status` spells out ' +
+        'the three-form process.',
+      title: 'E*TRADE production consumer key (optional)'
+    }),
+  ETRADE_PROD_CONSUMER_SECRET: z
+    .string()
+    .optional()
+    .meta({ title: 'E*TRADE production consumer secret (optional)' }),
+  ETRADE_SANDBOX_CONSUMER_KEY: z
+    .string()
+    .optional()
+    .meta({
+      description:
+        'Synthetic data, for proving the connection works. Instant and ' +
+        'self-service at https://us.etrade.com/etx/ris/apikey',
+      title: 'E*TRADE sandbox consumer key (optional)'
+    }),
+  ETRADE_SANDBOX_CONSUMER_SECRET: z
+    .string()
+    .optional()
+    .meta({ title: 'E*TRADE sandbox consumer secret (optional)' }),
   FRED_API_KEY: z
     .string()
     .optional()

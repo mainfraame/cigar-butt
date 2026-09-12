@@ -101,18 +101,14 @@ export const PROVIDERS: readonly ProviderSpec[] = [
     signupUrl: 'https://www.alphavantage.co/support/#api-key'
   },
   {
-    envVar: 'ETRADE_CONSUMER_KEY',
-    id: 'etrade-key',
-    label: 'E*TRADE consumer key',
+    envVar: 'ETRADE_SANDBOX_CONSUMER_KEY',
+    group: 'etrade',
+    id: 'etrade-sandbox-key',
+    label: 'E*TRADE sandbox consumer key',
     purpose:
-      'Reads real holdings and cash from an E*TRADE brokerage account so a ' +
-      'rebalance can be planned against the actual book. Read-only — this ' +
-      'server never places an order. Sandbox and production issue separate ' +
-      'keys and they are not interchangeable; set ETRADE_ENV to pick one. ' +
-      'Environment-scoped names (ETRADE_SANDBOX_CONSUMER_KEY, ' +
-      'ETRADE_PROD_CONSUMER_KEY) are read first, so both pairs can be held at ' +
-      'once and switched with ETRADE_ENV alone.',
-    rateLimit: '~2 requests/second and 7,000/hour on the accounts module',
+      'Proves the OAuth connection works against synthetic data. Instant and ' +
+      'self-service. Sandbox returns canned figures that do NOT match what you ' +
+      'ask for, so never read a real number from it.',
     requirement: 'optional',
     setupSteps: [
       'You need an E*TRADE account to get either key. It does NOT have to be ' +
@@ -158,15 +154,54 @@ export const PROVIDERS: readonly ProviderSpec[] = [
         'dies at midnight US Eastern, which nothing can renew past. After ' +
         'midnight, run `etrade_connect` again.'
     ],
+    signupUrl: 'https://us.etrade.com/etx/ris/apikey'
+  },
+  {
+    envVar: 'ETRADE_SANDBOX_CONSUMER_SECRET',
+    group: 'etrade',
+    id: 'etrade-sandbox-secret',
+    label: 'E*TRADE sandbox consumer secret',
+    purpose: 'Issued on the same page as the sandbox key.',
+    requirement: 'optional',
+    signupUrl: 'https://us.etrade.com/etx/ris/apikey'
+  },
+  {
+    envVar: 'ETRADE_PROD_CONSUMER_KEY',
+    group: 'etrade',
+    id: 'etrade-prod-key',
+    label: 'E*TRADE production consumer key',
+    purpose:
+      'Reads real holdings, balances and transactions from your E*TRADE ' +
+      'account so a rebalance can be planned against the actual book. ' +
+      'Read-only — this server never places an order. Not interchangeable with ' +
+      'the sandbox key; both can be stored at once and switched with the ' +
+      '`etrade_environment` tool.',
+    rateLimit: '~2 requests/second and 7,000/hour on the accounts module',
+    requirement: 'optional',
+    setupSteps: [
+      'Three forms on us.etrade.com, in order, while logged in.',
+      'Step 1 — API User Intent Survey: https://us.etrade.com/etx/ris/apisurvey/#/questionnaire',
+      'Step 2 — API Developer Agreement: https://us.etrade.com/etx/ris/apisurvey/#/agreement',
+      'Step 3 — annual market-data Attestation: https://us.etrade.com/etx/ris/apisurvey/#/attestation . ' +
+        'This one recurs yearly; letting it lapse costs market-data access.',
+      'An INDIVIDUAL key is then displayed on screen immediately — no email, no ' +
+        'PDF, no phone call, no review. A VENDOR key (multi-user or ' +
+        'redistributed) is issued Inactive and E*TRADE emails you to schedule a ' +
+        'short demo with Product and Legal first.',
+      'Your E*TRADE account does NOT need to be funded to get a key; funding is ' +
+        'only required to place trades. An individual key is locked to the user ' +
+        'ID that created it, and works across every account under that login.',
+      'Also sign the Market Data Agreement inside the brokerage account, or ' +
+        'quote data is refused.'
+    ],
     signupUrl: 'https://developer.etrade.com/getting-started'
   },
   {
-    envVar: 'ETRADE_CONSUMER_SECRET',
-    id: 'etrade-secret',
-    label: 'E*TRADE consumer secret',
-    purpose:
-      'Signs every E*TRADE request. Issued on the same screen as the consumer ' +
-      'key — see the walkthrough under that entry.',
+    envVar: 'ETRADE_PROD_CONSUMER_SECRET',
+    group: 'etrade',
+    id: 'etrade-prod-secret',
+    label: 'E*TRADE production consumer secret',
+    purpose: 'Issued on the same screen as the production key.',
     requirement: 'optional',
     signupUrl: 'https://developer.etrade.com/getting-started'
   },
