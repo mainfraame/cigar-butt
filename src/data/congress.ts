@@ -135,7 +135,22 @@ export interface HouseFiling {
  * way in — the page is a public search form, not an authentication wall — but
  * it means every call needs a jar, and the CSRF token rotates on the redirect.
  */
+/**
+ * The handshake is two requests and eFD is throttled to one a second, so
+ * re-running it per report tripled the cost of building the index. The session
+ * is reused for the life of the process and re-established only when it ages
+ * out.
+ */
+let session: undefined | { jar: Map<string, string>; openedAt: number };
+
+/** eFD sessions outlive this comfortably; the cap is a safety valve. */
+const SESSION_TTL_MS = 20 * 60 * 1000;
+
 async function senateSession(): Promise<Map<string, string>> {
+  if (session && Date.now() - session.openedAt < SESSION_TTL_MS) {
+    return session.jar;
+  }
+
   const jar = new Map<string, string>();
 
   await fetchText(`${SENATE_HOST}/search/home/`, {
@@ -161,6 +176,7 @@ async function senateSession(): Promise<Map<string, string>> {
     headers: { referer: `${SENATE_HOST}/search/home/` }
   });
 
+  session = { jar, openedAt: Date.now() };
   return jar;
 }
 
@@ -195,19 +211,20 @@ function orUndefined(value: string): string | undefined {
   return trimmed && trimmed !== '--' ? trimmed : undefined;
 }
 
-interface SenateReportRef {
+export interface SenateReportRef {
   readonly filedDate: string;
   readonly member: string;
   readonly url: string;
 }
 
-async function senateReportList(
+export async function senateReportList(
   since: string,
-  limit: number
+  limit: number,
+  start = 0
 ): Promise<SenateReportRef[]> {
   return cached(
     'congress-senate-list',
-    `${since}/${limit}`,
+    `${since}/${limit}/${start}`,
     TTL_REPORT_LIST,
     async () => {
       const jar = await senateSession();
@@ -225,7 +242,7 @@ async function senateReportList(
             // 11 is the Periodic Transaction Report type. Annual reports and
             // blind-trust filings carry no per-transaction detail.
             report_types: '[11]',
-            start: '0',
+            start: String(start),
             submitted_start_date: `${month}/${day}/${year} 00:00:00`
           },
           headers: {
@@ -254,7 +271,7 @@ async function senateReportList(
 }
 
 /** Parses one PTR page. Its table is plain HTML, so no PDF handling is needed. */
-async function senateReportTrades(
+export async function senateReportTrades(
   ref: SenateReportRef
 ): Promise<DisclosedTrade[]> {
   return cached('congress-senate-ptr', ref.url, TTL_REPORT, async () => {
@@ -287,36 +304,6 @@ async function senateReportTrades(
       ];
     });
   });
-}
-
-/**
- * Recent Senate transactions, newest first.
- *
- * Each report is a separate fetch, so `reportLimit` is the real cost control.
- * Reports are immutable once filed and cached for a month; only the list of
- * them is re-fetched.
- */
-export async function senateTrades({
-  reportLimit = 20,
-  since
-}: {
-  reportLimit?: number;
-  since: string;
-}): Promise<{
-  reportsRead: number;
-  trades: DisclosedTrade[];
-}> {
-  const refs = await senateReportList(since, reportLimit);
-
-  const trades: DisclosedTrade[] = [];
-  for (const ref of refs) {
-    trades.push(...(await senateReportTrades(ref)));
-  }
-
-  return {
-    reportsRead: refs.length,
-    trades: sortBy(trades, trade => trade.transactionDate).toReversed()
-  };
 }
 
 /**

@@ -6,7 +6,14 @@ import { screenMarket } from '../analysis/screen.ts';
 import { dec, out, ZERO } from '../math/decimal.ts';
 import { allocate } from '../portfolio/allocate.ts';
 import { planRebalance } from '../portfolio/rebalance.ts';
-import { attempt, DISCLAIMER, pct, requireSetup, text, usd } from './shared.ts';
+import {
+  attempt,
+  DISCLAIMER,
+  pct,
+  requireCapabilities,
+  text,
+  usd
+} from './shared.ts';
 
 import type { Order } from '../portfolio/rebalance.ts';
 
@@ -285,7 +292,7 @@ export function registerPortfolioTools(server: McpServer): void {
     },
     ({ limit, minNcavRatio, minTangibleBook, period }) =>
       attempt(async () => {
-        const blocked = requireSetup();
+        const blocked = requireCapabilities('sec');
         if (blocked) return blocked;
 
         const { rows, universeSize } = await screenMarket({

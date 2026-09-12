@@ -83,9 +83,18 @@ node dist/index.js
 
 ## Credentials
 
-The server behaves like an unauthenticated plugin: until credentials exist,
-every research tool refuses and returns the setup page instead, listing exactly
-what is missing and where to register for it.
+**Credentials are optional and checked per tool.** Nothing is globally
+blocked — a tool asks only for what it actually uses, so the rest of the server
+keeps working while you fill things in.
+
+- **No credential, ever:** congressional disclosures, FINRA short interest,
+  FDIC call reports, and the allocation and rebalance maths.
+- **`SEC_USER_AGENT`:** `analyze_ticker`, `check_disqualifiers`,
+  `screen_market`. This is the core of the server and needs no registration —
+  just a real name and email — so it is the one thing worth setting first.
+- **A price key:** `get_quotes`, and the P/TBV and price-to-NCAV verdicts.
+  Without one, `analyze_ticker` still reports the whole balance sheet and says
+  the price is unavailable rather than refusing.
 
 **To set them up, just ask.** Call `setup_credentials` with no arguments and the
 server prompts for each value (on clients that support elicitation) or returns
@@ -201,9 +210,19 @@ is the part carrying real information. No credential needed.
 
 | Tool                      | What it does                                                                                                                  |
 | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `congress_trades`         | Senate transactions from official eFD reports, cross-referenced against current committee assignments                         |
+| `congress_trades`         | Search disclosed Senate transactions **by ticker** or member, with each member's committee seats                              |
+| `congress_index`          | Show how much disclosure history is indexed locally, and backfill further                                                     |
 | `congress_member_profile` | A senator's committees, board seats and outside positions, plus every employer paying the household — self, spouse or child   |
 | `congress_house_filings`  | House transaction-report filings with PDF links. Filing records only: House disclosures are PDFs, many of them scanned images |
+
+**Why there is a local index.** eFD cannot be searched by ticker — its form
+takes a filer name, a state, a report type and a filing-date window, and
+nothing else. So transactions are parsed into a local SQLite index and queried
+there. It refreshes its recent window automatically when a day stale, and
+reports are immutable once filed, so staying current costs only the new
+filings. Depth is up to you: a 12-month window is ~180 reports, five years
+~690, the whole archive back to 2012 ~2,400, fetched at roughly one per second.
+`congress_index` reports coverage and resumes where it stopped.
 
 **On sources.** There is no bulk download of Senate disclosures and no export
 endpoint — the Senate Ethics Committee names

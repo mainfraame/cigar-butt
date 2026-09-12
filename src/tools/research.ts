@@ -22,7 +22,7 @@ import {
   attempt,
   cell,
   DISCLAIMER,
-  requireSetup,
+  requireCapabilities,
   text,
   usd
 } from './shared.ts';
@@ -61,7 +61,7 @@ export function registerResearchTools(server: McpServer): void {
     },
     ({ lookbackDays, ticker }) =>
       attempt(async () => {
-        const blocked = requireSetup();
+        const blocked = requireCapabilities('sec');
         if (blocked) return blocked;
 
         const entry = await resolveTicker(ticker);
@@ -118,7 +118,7 @@ export function registerResearchTools(server: McpServer): void {
     },
     ({ skipDisqualifiers, ticker }) =>
       attempt(async () => {
-        const blocked = requireSetup();
+        const blocked = requireCapabilities('sec');
         if (blocked) return blocked;
 
         const entry = await resolveTicker(ticker);
@@ -258,7 +258,7 @@ export function registerResearchTools(server: McpServer): void {
     },
     ({ tickers }) =>
       attempt(async () => {
-        const blocked = requireSetup();
+        const blocked = requireCapabilities('prices');
         if (blocked) return blocked;
 
         const { failed, quotes: found } = await quotes(tickers);

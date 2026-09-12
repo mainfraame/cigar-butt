@@ -4,14 +4,20 @@ import { groupBy, sortBy } from 'lodash-es';
 import * as z from 'zod/v4';
 
 import {
+  indexState,
+  isStale,
+  refreshIndex,
+  searchTrades,
+  topTickers,
+  type IndexedTrade
+} from '../data/congress-index.ts';
+import {
   committeesByMember,
   findSenateAnnualReport,
   houseFilings,
   normaliseName,
   senateAnnualReport,
-  senateTrades,
-  type Committee,
-  type DisclosedTrade
+  type Committee
 } from '../data/congress.ts';
 import { attempt, cell, DISCLAIMER, text } from './shared.ts';
 
@@ -33,6 +39,7 @@ const LAG_CAVEAT =
   'Treat it as a lead to research, never as a price you could have got.';
 
 const DAY_MS = 86_400_000;
+const TWENTY_FOUR_HOURS = 24 * 60 * 60;
 
 function daysAgo(days: number): string {
   return new Date(Date.now() - days * DAY_MS).toISOString().slice(0, 10);
@@ -46,114 +53,108 @@ function committeesFor(
   return rosters.get(normaliseName(member)) ?? [];
 }
 
-function tradeRow(trade: DisclosedTrade): string {
-  return (
-    `| ${trade.transactionDate} | ${trade.filedDate} | ${trade.member} | ` +
-    `${cell(trade.ticker)} | ${trade.type} | ${trade.amount} | ${trade.owner} |`
-  );
-}
-
 export function registerCongressTools(server: McpServer): void {
   server.registerTool(
     'congress_trades',
     {
       annotations: { openWorldHint: true, readOnlyHint: true },
       description:
-        'Recent stock transactions disclosed by US senators, read from the ' +
-        "Senate's official eFD periodic transaction reports and cross-referenced " +
-        'against current committee assignments. No credential needed. Filter by ' +
-        'ticker or member. Amounts are bands and disclosure lags the trade by ' +
-        'weeks — this is a lead to research, not a price. The committee column ' +
-        'is the part worth reading: a member trading in a sector their committee ' +
-        'supervises is a different observation from the same member buying an ' +
-        'index fund.',
+        'Search disclosed Senate stock transactions **by ticker**, by member, or ' +
+        'both. No credential needed. This is the natural entry point: ask "who ' +
+        'in the Senate traded ASTE?" and get every disclosed transaction in the ' +
+        'index, with the committees each member sits on.\n\n' +
+        'eFD itself cannot be searched by ticker — its form takes a filer name, ' +
+        'a state and a filing-date window and nothing else — so transactions are ' +
+        'held in a local index. It refreshes itself when stale, and reports are ' +
+        'immutable once filed, so keeping current costs only the new filings. ' +
+        'Use `congress_index` to see how deep the index reaches and to backfill ' +
+        'further; a search can only find what has been indexed.',
       inputSchema: z.object({
+        limit: z.number().int().min(1).max(200).default(50),
         member: z
           .string()
           .max(60)
           .optional()
-          .describe('Filter to one senator by name, matched loosely.'),
-        reportLimit: z
-          .number()
-          .int()
-          .min(1)
-          .max(60)
-          .default(20)
-          .describe(
-            'How many recent reports to open. Each is a separate fetch against a ' +
-              'rate-limited government site, so this is the real cost control. ' +
-              'Reports are immutable once filed and cached for a month.'
-          ),
+          .describe('Filter by senator name; matched as a substring.'),
         sinceDays: z
           .number()
           .int()
           .min(1)
           .max(5000)
-          .default(30)
-          .describe(
-            'Only reports filed within this many days. The archive reaches back ' +
-              'to 2012, so a long window is legitimate — but it returns the ' +
-              'NEWEST `reportLimit` reports in that window, not the oldest, so ' +
-              'narrow the window to walk backwards rather than raising the limit.'
-          ),
+          .default(365)
+          .describe('Only transactions this recent, by transaction date.'),
         ticker: z
           .string()
           .max(10)
           .optional()
-          .describe('Filter to one ticker. Bonds and funds often have none.')
+          .describe(
+            'Ticker to search for, e.g. "NVDA". Bonds, funds and private ' +
+              'holdings often have no ticker and will not match.'
+          )
       }),
-      title: 'Recent congressional trades'
+      title: 'Search congressional trades by ticker'
     },
-    ({ member, reportLimit, sinceDays, ticker }) =>
+    ({ limit, member, sinceDays, ticker }) =>
       attempt(async () => {
-        const [{ reportsRead, trades }, rosters] = await Promise.all([
-          senateTrades({ reportLimit, since: daysAgo(sinceDays) }),
-          committeesByMember()
-        ]);
+        // Keep the recent window current automatically. A day-old index is the
+        // most staleness a source that publishes on a 45-day lag can justify.
+        const refreshed = isStale(TWENTY_FOUR_HOURS)
+          ? await refreshIndex({ maxReports: 8, since: daysAgo(45) })
+          : undefined;
 
-        const wantedTicker = ticker?.trim().toUpperCase();
-        const wantedMember = member ? normaliseName(member) : undefined;
-
-        const shown = trades.filter(trade => {
-          if (wantedTicker && trade.ticker?.toUpperCase() !== wantedTicker) {
-            return false;
-          }
-          if (wantedMember && normaliseName(trade.member) !== wantedMember) {
-            return false;
-          }
-          return true;
-        });
-
-        if (shown.length === 0) {
+        const state = indexState();
+        if (state.trades === 0) {
           return text(
-            `No matching transactions in ${reportsRead} report(s) filed since ` +
-              `${daysAgo(sinceDays)}.` +
-              (trades.length > 0
-                ? ` Those reports held ${trades.length} other transaction(s), so ` +
-                  'widen `reportLimit` or `sinceDays` before concluding there are none.'
-                : ' Try a longer window.') +
-              `\n\n${LAG_CAVEAT}` +
+            'The local index is empty, so there is nothing to search yet.\n\n' +
+              'Run `congress_index` with a `sinceDays` window to build it. eFD ' +
+              'cannot be queried by ticker, so the index is the only way to ask ' +
+              'this question.' +
               DISCLAIMER
           );
         }
 
-        const rows = shown.map(trade => tradeRow(trade)).join('\n');
+        const rosters = await committeesByMember();
+        const hits = searchTrades({
+          limit,
+          member,
+          since: daysAgo(sinceDays),
+          ticker
+        });
 
-        // The committee cross-reference is the reason this tool exists, so it
-        // gets its own block rather than a column that would wrap unreadably.
-        const byMember = groupBy(shown, trade => trade.member);
+        const coverage =
+          `Index holds ${state.trades.toLocaleString()} transactions from ` +
+          `${state.reports.toLocaleString()} reports, filed ` +
+          `${state.oldestFiled} to ${state.newestFiled}.`;
+
+        if (hits.length === 0) {
+          const popular = topTickers(12)
+            .map(row => `${row.ticker} (${row.trades})`)
+            .join(', ');
+          return text(
+            `No disclosed transactions${ticker ? ` in ${ticker.toUpperCase()}` : ''}` +
+              `${member ? ` by ${member}` : ''} within ${sinceDays} days.\n\n` +
+              `${coverage} A miss means either no senator disclosed it, or the ` +
+              'index does not reach far enough back — check `congress_index` ' +
+              'before concluding the former.\n\n' +
+              `Most-traded tickers held: ${popular}` +
+              DISCLAIMER
+          );
+        }
+
+        const rows = hits
+          .map(
+            (hit: IndexedTrade) =>
+              `| ${hit.transactionDate} | ${hit.filedDate} | ${hit.member} | ` +
+              `${cell(hit.ticker)} | ${hit.type} | ${hit.amount} | ${hit.owner} |`
+          )
+          .join('\n');
+
+        const byMember = groupBy(hits, hit => hit.member);
         const context = sortBy(Object.keys(byMember))
           .map(name => {
             const committees = committeesFor(rosters, name);
-            const tickers = [
-              ...new Set(
-                (byMember[name] ?? [])
-                  .map(trade => trade.ticker)
-                  .filter((value): value is string => value !== undefined)
-              )
-            ];
             return (
-              `- **${name}** — ${tickers.length > 0 ? tickers.join(', ') : 'no listed tickers'}\n` +
+              `- **${name}** — ${(byMember[name] ?? []).length} transaction(s)\n` +
               (committees.length > 0
                 ? committees
                     .map(
@@ -167,15 +168,107 @@ export function registerCongressTools(server: McpServer): void {
           .join('\n');
 
         return text(
-          `## Disclosed senate transactions\n\n` +
-            `${shown.length} transaction(s) from ${reportsRead} report(s) filed ` +
-            `since ${daysAgo(sinceDays)}.\n\n` +
+          `## Disclosed senate transactions` +
+            `${ticker ? ` — ${ticker.toUpperCase()}` : ''}\n\n` +
+            `${hits.length} match(es).\n\n` +
             '| Transaction | Filed | Member | Ticker | Type | Amount | Owner |\n' +
             `|---|---|---|---|---|---|---|\n${rows}\n\n` +
             `### Committee context\n\n${context}\n\n` +
-            `${LAG_CAVEAT}\n\n` +
+            `${coverage}` +
+            (refreshed && refreshed.reportsIndexed > 0
+              ? ` Added ${refreshed.reportsIndexed} new report(s) on this call.`
+              : '') +
+            `\n\n${LAG_CAVEAT}\n\n` +
             'Owner is the relationship, not a name: "Spouse" and "Child" holdings ' +
             'are disclosed but the family member is never identified.' +
+            DISCLAIMER
+        );
+      })
+  );
+
+  server.registerTool(
+    'congress_index',
+    {
+      annotations: {
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
+        readOnlyHint: false
+      },
+      description:
+        'Show how much Senate disclosure history is indexed locally, and extend ' +
+        'it. Call with no arguments to report coverage; pass `sinceDays` to ' +
+        'backfill. Each report is a separate request against a rate-limited ' +
+        'government site, so work is capped per call and resumes where it left ' +
+        'off — reports already indexed are never refetched, because a filed ' +
+        'report never changes. Rough sizes: 12 months is ~180 reports, five ' +
+        'years ~690, and the whole archive back to 2012 is ~2,400. Expect to ' +
+        'call this several times to build deep history; each call reports how ' +
+        'many reports remain.',
+      inputSchema: z.object({
+        maxReports: z
+          .number()
+          .int()
+          .min(1)
+          .max(45)
+          .default(25)
+          .describe(
+            'Reports to fetch on this call, at roughly one per second. Capped ' +
+              'because MCP clients time a tool call out at 60 seconds — the ' +
+              'backfill is resumable, so several short calls beat one that dies.'
+          ),
+        sinceDays: z
+          .number()
+          .int()
+          .min(1)
+          .max(5000)
+          .optional()
+          .describe(
+            'Filing-date window to index. Omit to report coverage without ' +
+              'fetching anything.'
+          )
+      }),
+      title: 'Inspect or extend the disclosure index'
+    },
+    ({ maxReports, sinceDays }) =>
+      attempt(async () => {
+        const result =
+          sinceDays === undefined
+            ? undefined
+            : await refreshIndex({ maxReports, since: daysAgo(sinceDays) });
+
+        const state = indexState();
+        const popular = topTickers(15)
+          .map(row => `| ${row.ticker} | ${row.trades} | ${row.members} |`)
+          .join('\n');
+
+        return text(
+          `## Disclosure index\n\n` +
+            `${state.reports.toLocaleString()} reports · ` +
+            `${state.trades.toLocaleString()} transactions · ` +
+            `${state.tickers.toLocaleString()} distinct tickers\n\n` +
+            `Filings indexed from **${state.oldestFiled ?? '—'}** to ` +
+            `**${state.newestFiled ?? '—'}**.\n\n` +
+            (result
+              ? `Indexed ${result.reportsIndexed} report(s) and ` +
+                `${result.tradesAdded} transaction(s) on this call. ` +
+                (result.remaining > 0
+                  ? `**${result.remaining} report(s) still pending** in that ` +
+                    'window — call again to continue; it resumes where it stopped.'
+                  : 'That window is now fully indexed.') +
+                (result.failures.length > 0
+                  ? `\n\n${result.failures.length} report(s) failed to parse:\n` +
+                    result.failures
+                      .map(entry => `- ${entry.url}: ${entry.reason}`)
+                      .join('\n')
+                  : '') +
+                '\n\n'
+              : 'Pass `sinceDays` to extend coverage.\n\n') +
+            (state.tickers > 0
+              ? `### Most-traded tickers held\n\n| Ticker | Trades | Members |\n|---|---|---|\n${popular}\n\n`
+              : '') +
+            `Stored at ${state.path}. eFD cannot be searched by ticker, which is ` +
+            'why this exists; a ticker search can only find what is indexed.' +
             DISCLAIMER
         );
       })

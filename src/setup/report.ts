@@ -47,12 +47,43 @@ export function renderSetup(report: SetupReport = setupReport()): string {
 
   const sections: string[] = [];
 
+  const hasSec = report.statuses.some(
+    status => status.spec.id === 'sec' && status.configured
+  );
+  const hasPrices = !report.unsatisfiedGroups.includes('prices');
+
   sections.push(
     report.ready
-      ? '## Setup complete\n\nAll required credentials are present. Research tools are available.'
-      : '## Setup required\n\nThis server cannot screen until the credentials below are set. ' +
-          'Call `setup_credentials` with the values, or set the environment variables ' +
-          'in your MCP client config.'
+      ? '## Setup complete\n\nEvery credential is present; all tools are available.'
+      : '## Setup\n\nCredentials are optional and checked per tool — nothing is ' +
+          'globally blocked. Fill in what you want and the rest of the server ' +
+          'keeps working. Call `setup_credentials` with the values, or set the ' +
+          'environment variables in your MCP client config.'
+  );
+
+  // Say what already works before listing what is missing. Most of this server
+  // needs no credential at all, and a page that opens with blockers implies
+  // otherwise.
+  sections.push(
+    '### What works right now\n\n' +
+      '**No credential needed, ever:**\n' +
+      '- `congress_trades`, `congress_member_profile`, `congress_house_filings` ' +
+      '— Senate and House disclosures, committee seats, board seats\n' +
+      '- `short_interest` — FINRA consolidated short interest\n' +
+      '- `bank_call_report` — FDIC call reports for banks\n' +
+      '- `build_allocation`, `plan_rebalance` — sizing and order planning on ' +
+      'figures you supply\n\n' +
+      `**With \`SEC_USER_AGENT\`${hasSec ? ' — set' : ' — not set'}:** ` +
+      '`analyze_ticker`, `check_disqualifiers`, `screen_market`. This is the ' +
+      'core of the server, it needs no registration, and it is the single ' +
+      'highest-value thing to fill in.\n\n' +
+      `**With a price key${hasPrices ? ' — set' : ' — not set'}:** \`get_quotes\`, ` +
+      'and the P/TBV and price-to-NCAV verdicts inside `analyze_ticker`. ' +
+      'Without one, `analyze_ticker` still reports the full balance sheet and ' +
+      'says the price is unavailable rather than refusing.\n\n' +
+      '**With E*TRADE keys:** reading your real holdings, balances and ' +
+      'transactions.\n\n' +
+      '**With `FRED_API_KEY`:** `macro_context`.'
   );
 
   const required = byRequirement['required'] ?? [];
@@ -125,7 +156,11 @@ export function renderSetup(report: SetupReport = setupReport()): string {
       ...report.missingRequired.map(spec => `${spec.label} (${spec.envVar})`),
       ...report.unsatisfiedGroups.map(group => `at least one ${group} provider`)
     ];
-    sections.push(`### Blocking\n\n${blockers.map(b => `- ${b}`).join('\n')}`);
+    sections.push(
+      `### Not set\n\n${blockers.map(b => `- ${b}`).join('\n')}\n\n` +
+        'Each of these limits specific tools, listed above. None of them stops ' +
+        'the server running.'
+    );
   }
 
   return sections.join('\n\n');
@@ -182,14 +217,17 @@ export function startupBanner(report: SetupReport = setupReport()): string {
   ];
 
   return [
-    'cigar-butt is NOT configured yet. Screening tools will refuse until it is.',
+    `cigar-butt started with ${configured.length} of ${report.statuses.length} credentials set.`,
+    'Credentials are optional and checked per tool — congressional disclosures,',
+    'FINRA short interest, FDIC call reports and the portfolio maths all work',
+    'with none at all.',
     '',
-    'Missing:',
+    'Not set:',
     ...blockers,
     '',
-    'To fix it, ask your assistant to run the `setup_credentials` tool — it will',
-    'walk you through each one, including the E*TRADE API key process. Or set the',
-    'environment variables above in your MCP client config.',
+    'Ask your assistant to run `setup_credentials` to fill any of these in — it',
+    'walks through each, including the E*TRADE API key process. `setup_status`',
+    'lists every sign-up link and what each unlocks.',
     '',
     `Credentials are stored at ${report.configPath} (mode 0600).`
   ].join('\n');
