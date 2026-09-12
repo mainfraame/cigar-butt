@@ -2,7 +2,11 @@ import type { McpServer } from '@modelcontextprotocol/server';
 
 import * as z from 'zod/v4';
 
-import { extractItem, filingText } from '../data/filing-text.ts';
+import {
+  extractItem,
+  filingDocuments,
+  filingText
+} from '../data/filing-text.ts';
 import { resolveTicker, submissions } from '../data/sec.ts';
 import { attempt, DISCLAIMER, requireCapabilities, text } from './shared.ts';
 
@@ -34,6 +38,15 @@ export function registerFilingTools(server: McpServer): void {
             'Exact accession number, e.g. `0000950170-25-060165`. Omit to take ' +
               'the most recent filing matching `form` and `item`.'
           ),
+        document: z
+          .string()
+          .max(120)
+          .optional()
+          .describe(
+            'A file within the filing, such as an exhibit. Pass `list` to see ' +
+              'what a filing contains. A 13D puts its transaction detail in an ' +
+              'exhibit and says nothing about it in the body.'
+          ),
         form: z
           .string()
           .max(16)
@@ -47,12 +60,16 @@ export function registerFilingTools(server: McpServer): void {
             'An 8-K item number such as `3.01`. Filters the search and scopes ' +
               'the text returned to that section.'
           ),
+        list: z
+          .boolean()
+          .default(false)
+          .describe('List the files in the filing instead of reading one.'),
         maxChars: z.number().int().min(500).max(20_000).default(DEFAULT_LIMIT),
         ticker: z.string().min(1).max(10)
       }),
       title: 'Read the text of a filing'
     },
-    ({ accession, form, item, maxChars, ticker }) =>
+    ({ accession, document, form, item, list, maxChars, ticker }) =>
       attempt(async () => {
         const blocked = requireCapabilities('sec');
         if (blocked) return blocked;
@@ -85,14 +102,32 @@ export function registerFilingTools(server: McpServer): void {
           );
         }
 
-        const body = await filingText(cik, event);
+        if (list) {
+          const files = await filingDocuments(cik, event.accessionNumber);
+          return text(
+            `## ${company.title} — ${event.form} ${event.accessionNumber}\n\n` +
+              `Filed ${event.filingDate}. ${files.length} file(s):\n\n` +
+              '| File | Bytes |\n|---|---|\n' +
+              files
+                .map(
+                  file =>
+                    `| \`${file.name}\`${file.name === event.primaryDocument ? ' *(primary)*' : ''} | ` +
+                    `${file.size?.toLocaleString('en-US') ?? '—'} |`
+                )
+                .join('\n') +
+              '\n\nPass one as `document` to read it.' +
+              DISCLAIMER
+          );
+        }
+
+        const body = await filingText(cik, event, document);
         if (!body) {
           return text(
-            `Could not read the document for ${event.form} ` +
+            `Could not read ${document ?? 'the primary document'} for ${event.form} ` +
               `${event.accessionNumber} (filed ${event.filingDate}). The index ` +
               'names it but the file did not come back — open it directly at ' +
               'https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=' +
-              `${cik}`
+              `${cik} — or pass \`list: true\` to see what the filing contains.`
           );
         }
 
@@ -105,7 +140,8 @@ export function registerFilingTools(server: McpServer): void {
             `${event.items.length > 0 ? ` (items ${event.items.join(', ')})` : ''}\n\n` +
             `Filed ${event.filingDate}` +
             `${event.reportDate ? `, reporting ${event.reportDate}` : ''}. ` +
-            `Accession \`${event.accessionNumber}\`.\n\n` +
+            `Accession \`${event.accessionNumber}\`` +
+            `${document ? `, file \`${document}\`` : ''}.\n\n` +
             (item && scoped === undefined
               ? `Item ${item} is listed in the index but no heading for it was ` +
                 'found in the text, so the whole document follows. Filers ' +

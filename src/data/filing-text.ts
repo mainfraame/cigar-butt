@@ -1,5 +1,5 @@
 import { cached, TTL } from '../cache/store.ts';
-import { fetchText } from '../http/client.ts';
+import { fetchJson, fetchText } from '../http/client.ts';
 
 import type { FilingEvent } from './sec.ts';
 
@@ -72,19 +72,66 @@ export function extractItem(text: string, item: string): string | undefined {
  * the directory, which would be a second request and would have to guess which
  * of several files is the filing.
  */
+/** One file inside a filing. */
+export interface FilingDocument {
+  readonly name: string;
+  readonly size: number | undefined;
+}
+
+interface DirectoryResponse {
+  directory?: { item?: { name?: string; size?: string }[] };
+}
+
+/**
+ * Every file in a filing, not just the main one.
+ *
+ * A 13D puts its transaction detail in an exhibit — Sarissa's Amendment 16
+ * reports sixty days of trading in Exhibit 17 and says nothing about it in
+ * the body — so a reader limited to the primary document can see that
+ * something was traded and never what.
+ */
+export async function filingDocuments(
+  cik: string,
+  accessionNumber: string
+): Promise<FilingDocument[]> {
+  const bare = accessionNumber.replaceAll('-', '');
+  const url = `https://www.sec.gov/Archives/edgar/data/${Number(cik)}/${bare}/index.json`;
+
+  const data = await cached(
+    'sec-filing-index',
+    accessionNumber,
+    TTL.frames,
+    () => fetchJson<DirectoryResponse>(url, SEC_RATE)
+  );
+
+  return (data.directory?.item ?? [])
+    .map(item => ({
+      name: item.name ?? '',
+      size: item.size === undefined ? undefined : Number(item.size)
+    }))
+    .filter(
+      item =>
+        item.name.length > 0 &&
+        // The index pages describe the filing rather than being part of it.
+        !item.name.includes('-index')
+    );
+}
+
 export async function filingText(
   cik: string,
-  event: FilingEvent
+  event: FilingEvent,
+  document?: string
 ): Promise<string | undefined> {
-  if (!event.primaryDocument) return undefined;
+  const name = document ?? event.primaryDocument;
+  if (!name) return undefined;
 
   const bare = event.accessionNumber.replaceAll('-', '');
-  const url = `https://www.sec.gov/Archives/edgar/data/${Number(cik)}/${bare}/${event.primaryDocument}`;
+  const url = `https://www.sec.gov/Archives/edgar/data/${Number(cik)}/${bare}/${name}`;
 
   try {
     const body = await cached(
       'sec-filing-text',
-      event.accessionNumber,
+      `${event.accessionNumber}/${name}`,
       // A filed document never changes, so this is cacheable for as long as
       // anything here is.
       TTL.frames,
