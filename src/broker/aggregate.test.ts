@@ -18,6 +18,7 @@ function account(
 ): AccountRef {
   return {
     account: {
+      active: true,
       description: `${brokerId} account`,
       id: `${brokerId}-1`,
       number: `${brokerId}-0001`,

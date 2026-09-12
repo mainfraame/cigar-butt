@@ -185,12 +185,31 @@ export async function openBook(
     }
   }
 
+  // A closed account cannot be sold out of, so its holdings must not swell a
+  // combined position into an order nobody can fill. Naming it explicitly is
+  // still honoured — reading a closed account is a legitimate thing to want.
+  const closed = accounts.filter(entry => !entry.account.active);
+  const live = options.account
+    ? accounts
+    : accounts.filter(entry => entry.account.active);
+
+  for (const entry of closed) {
+    if (options.account) break;
+    excluded.push({
+      brokerId: entry.brokerId,
+      label: `${entry.brokerLabel} ${entry.account.number}`,
+      reason:
+        `is ${entry.account.status.toLowerCase()}. Nothing in it can be sold, ` +
+        'so counting its holdings would inflate a position'
+    });
+  }
+
   const filtered = options.account
-    ? accounts.filter(
+    ? live.filter(
         entry =>
           entry.ref === options.account || entry.account.id === options.account
       )
-    : accounts;
+    : live;
 
   return {
     accounts: sortBy(filtered, entry => entry.ref),

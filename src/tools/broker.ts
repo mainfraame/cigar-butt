@@ -892,8 +892,8 @@ function scopeNotes(scope: BookScope): string {
         .map(entry => `${entry.label} — ${entry.reason}`)
         .join(
           '; '
-        )}. Pass \`broker: "${scope.excluded[0]!.brokerId}"\` to read ` +
-        'that book on its own.'
+        )}. Pass \`broker\` or an account \`ref\` to read one of those on ` +
+        'its own.'
     );
   }
 

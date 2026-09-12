@@ -267,6 +267,7 @@ export const alpacaAdapter: BrokerAdapter = {
     // One account per key, so there is nothing to choose between.
     return [
       {
+        active: account.status?.toUpperCase() !== 'ACCOUNT_CLOSED',
         description: paper ? 'Alpaca paper trading' : 'Alpaca brokerage',
         // Alpaca's own handle for the account is the UUID, not the number.
         id: account.id ?? account.account_number ?? 'default',

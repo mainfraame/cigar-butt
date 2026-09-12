@@ -279,6 +279,7 @@ describe('accounts', () => {
 
     expect(await alpacaAdapter.accounts()).toEqual([
       {
+        active: true,
         description: 'Alpaca paper trading',
         id: '36b6db2e-1c50-4117-ac20-e35b0b972a38',
         number: 'PA32F0I978PS',

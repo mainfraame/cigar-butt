@@ -98,6 +98,16 @@ export interface Balances {
 }
 
 export interface BrokerAccount {
+  /**
+   * Whether this account can still hold or trade a position.
+   *
+   * A closed account is excluded from the combined book: you cannot sell what
+   * is in it, so including its holdings would inflate a position and produce a
+   * rebalance order nobody can fill. Only a *definite* close sets this false —
+   * an unrecognised status leaves it true, because hiding an account the user
+   * has money in is the worse error of the two.
+   */
+  readonly active: boolean;
   readonly description: string;
   /** The opaque key this broker's own API needs. Not the account number. */
   readonly id: string;

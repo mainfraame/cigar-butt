@@ -9,6 +9,7 @@ const d = (value: string): Decimal => dec(value)!;
 function account(brokerId: string, number: string): AccountRef {
   return {
     account: {
+      active: true,
       description: '',
       id: `${brokerId}-${number}`,
       number,

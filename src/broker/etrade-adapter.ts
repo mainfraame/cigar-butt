@@ -36,6 +36,8 @@ const toEtrade = (env: BrokerEnvironment): 'production' | 'sandbox' =>
 export const etradeAdapter: BrokerAdapter = {
   accounts: async () =>
     (await listAccounts()).map(account => ({
+      // E*TRADE says CLOSED and nothing else means closed.
+      active: account.accountStatus?.toUpperCase() !== 'CLOSED',
       description: account.accountDesc || account.accountName,
       id: account.accountIdKey,
       number: account.accountId,

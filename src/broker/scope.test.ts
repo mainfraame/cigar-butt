@@ -21,6 +21,7 @@ const { openBook, readBook } = await import('./aggregate.ts');
 const d = (value: string): Decimal => dec(value)!;
 
 interface FakeOptions {
+  active?: boolean;
   cash?: string;
   environment?: BrokerEnvironment;
   failAccounts?: boolean;
@@ -36,10 +37,11 @@ function fake(id: string, options: FakeOptions = {}): RegisteredBroker {
         ? Promise.reject(new Error(`${id} is down`))
         : Promise.resolve([
             {
+              active: options.active ?? true,
               description: `${id} account`,
               id: `${id}-1`,
               number: `${id}-0001`,
-              status: 'ACTIVE',
+              status: options.active === false ? 'CLOSED' : 'ACTIVE',
               taxTreatment: 'unknown' as const,
               type: 'BROKERAGE'
             }
@@ -159,6 +161,26 @@ describe('openBook scoping', () => {
 
     expect(scope.accounts.map(entry => entry.brokerId)).toEqual(['alpaca']);
     expect(scope.failures[0]?.reason).toContain('etrade is down');
+  });
+
+  it('leaves a closed account out of the combined book', async () => {
+    // You cannot sell what is in a closed account, so counting its holdings
+    // would inflate a position into an order nobody can fill.
+    only(fake('etrade', { active: false }), fake('alpaca'));
+
+    const scope = await openBook();
+
+    expect(scope.accounts.map(entry => entry.brokerId)).toEqual(['alpaca']);
+    expect(scope.excluded[0]?.reason).toContain('closed');
+  });
+
+  it('still reads a closed account when it is named', async () => {
+    only(fake('etrade', { active: false }));
+
+    const scope = await openBook({ account: 'etrade:etrade-1' });
+
+    expect(scope.accounts).toHaveLength(1);
+    expect(scope.excluded).toHaveLength(0);
   });
 
   it('returns an empty scope when nothing is connected', async () => {
