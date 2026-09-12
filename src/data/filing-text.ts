@@ -1,5 +1,6 @@
 import { cached, TTL } from '../cache/store.ts';
 import { fetchJson, fetchText } from '../http/client.ts';
+import { dec, div, ZERO, type Decimal } from '../math/decimal.ts';
 
 import type { FilingEvent } from './sec.ts';
 
@@ -141,4 +142,84 @@ export async function filingText(
   } catch {
     return undefined;
   }
+}
+
+/** One row of a filer's broker fills report. */
+export interface Fill {
+  readonly amount: Decimal;
+  readonly buy: boolean;
+  readonly price: Decimal;
+  readonly tradeDate: string;
+}
+
+export interface FillSummary {
+  readonly bought: Decimal;
+  readonly fills: number;
+  readonly from: string;
+  readonly highPrice: Decimal;
+  readonly lowPrice: Decimal;
+  readonly sold: Decimal;
+  readonly to: string;
+  /** Value-weighted average across every fill, buys and sells alike. */
+  readonly vwap: Decimal | undefined;
+}
+
+/**
+ * Parses the transaction schedule a 13D or 13G filer attaches.
+ *
+ * Rule 13d-2 makes a filer disclose sixty days of trading, and the usual form
+ * is a raw broker fills report: hundreds of rows of side, price, amount and
+ * date, with no total anywhere. Sarissa's Amarin exhibit runs to 19,000
+ * characters and says only "Sell" over and over — the direction is legible at
+ * a glance and the size is not, which is the wrong way round for a reader
+ * deciding whether a holder is trimming or leaving.
+ *
+ * Deliberately tolerant and deliberately silent on failure: there is no
+ * prescribed format, so a layout this does not recognise returns nothing
+ * rather than a number assembled from whatever matched.
+ */
+export function parseFills(text: string): FillSummary | undefined {
+  const rows = [
+    ...text.matchAll(
+      /\b(Buy|Sell|Purchase|Sale)\b[\s|]+([\d,]+\.?\d*)[\s|]+([\d,]+\.?\d*)[\s|]+(\d{4}-\d{2}-\d{2})/gi
+    )
+  ];
+  if (rows.length === 0) return undefined;
+
+  const fills: Fill[] = [];
+  for (const row of rows) {
+    const price = dec(row[2]?.replaceAll(',', ''));
+    const amount = dec(row[3]?.replaceAll(',', ''));
+    if (!price || !amount || !row[4]) continue;
+    fills.push({
+      amount,
+      buy: /^(buy|purchase)$/i.test(row[1] ?? ''),
+      price,
+      tradeDate: row[4]
+    });
+  }
+  if (fills.length === 0) return undefined;
+
+  const dates = fills.map(fill => fill.tradeDate).toSorted();
+  const prices = fills.map(fill => fill.price);
+  const gross = fills.reduce(
+    (total, fill) => total.plus(fill.price.times(fill.amount)),
+    ZERO
+  );
+  const shares = fills.reduce((total, fill) => total.plus(fill.amount), ZERO);
+
+  return {
+    bought: fills
+      .filter(fill => fill.buy)
+      .reduce((total, fill) => total.plus(fill.amount), ZERO),
+    fills: fills.length,
+    from: dates[0]!,
+    highPrice: prices.reduce((high, price) => (price.gt(high) ? price : high)),
+    lowPrice: prices.reduce((low, price) => (price.lt(low) ? price : low)),
+    sold: fills
+      .filter(fill => !fill.buy)
+      .reduce((total, fill) => total.plus(fill.amount), ZERO),
+    to: dates.at(-1)!,
+    vwap: div(gross, shares)
+  };
 }

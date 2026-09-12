@@ -5,10 +5,18 @@ import * as z from 'zod/v4';
 import {
   extractItem,
   filingDocuments,
-  filingText
+  filingText,
+  parseFills
 } from '../data/filing-text.ts';
 import { resolveTicker, submissions } from '../data/sec.ts';
-import { attempt, DISCLAIMER, requireCapabilities, text } from './shared.ts';
+import { out } from '../math/decimal.ts';
+import {
+  attempt,
+  DISCLAIMER,
+  requireCapabilities,
+  text,
+  usd
+} from './shared.ts';
 
 /** How much prose to return before truncating. */
 const DEFAULT_LIMIT = 6000;
@@ -131,6 +139,11 @@ export function registerFilingTools(server: McpServer): void {
           );
         }
 
+        // A fills schedule is hundreds of rows with no total anywhere. The
+        // direction is legible at a glance and the size is not, which is the
+        // wrong way round for deciding whether a holder is trimming or leaving.
+        const fills = parseFills(body);
+
         const scoped = item ? extractItem(body, item) : undefined;
         const chosen = scoped ?? body;
         const truncated = chosen.length > maxChars;
@@ -146,6 +159,18 @@ export function registerFilingTools(server: McpServer): void {
               ? `Item ${item} is listed in the index but no heading for it was ` +
                 'found in the text, so the whole document follows. Filers ' +
                 'format these by hand and some omit the heading.\n\n'
+              : '') +
+            (fills
+              ? '### Transaction schedule\n\n' +
+                `${fills.fills} fill(s) between ${fills.from} and ${fills.to}: ` +
+                `**${out(fills.bought, 0)?.toLocaleString('en-US')} bought, ` +
+                `${out(fills.sold, 0)?.toLocaleString('en-US')} sold** — ` +
+                `net ${out(fills.bought.minus(fills.sold), 0)?.toLocaleString('en-US')}. ` +
+                `Prices ${usd(out(fills.lowPrice))} to ${usd(out(fills.highPrice))}, ` +
+                `volume-weighted ${usd(out(fills.vwap))}.\n\n` +
+                'Totalled from the rows below rather than read off them — a ' +
+                'filer reports fills and no total, and a direction visible at ' +
+                'a glance says nothing about size.\n\n'
               : '') +
             `${chosen.slice(0, maxChars)}${truncated ? '…' : ''}\n\n` +
             (truncated
