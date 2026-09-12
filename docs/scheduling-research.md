@@ -251,6 +251,149 @@ MCP auto-discovery, so don't use it here.
 scheduler (works, costs model tokens per run) and `/loop` (needs a terminal
 open). Nothing inside Claude Code fires an MCP tool on a clock by itself.
 
+### B.2 GitHub Copilot in VS Code, and the Copilot cloud agent
+
+**VS Code agent mode** has the richest MCP support of any host surveyed:
+`.vscode/mcp.json`, all three transports (`stdio`, `http`, `sse` — the last
+documented as legacy), and documented support for tools, prompts, resources,
+elicitation (1.102) and sampling (1.101). It has **no scheduler**. Local,
+background and `/delegate` cloud sessions are all human-initiated.
+
+**The Copilot coding agent on github.com** does have cron paths — Agentic
+Workflows (`on: schedule` compiled to an Actions `.lock.yml`, MCP declared in
+frontmatter), `copilot -p … --no-ask-user` in a scheduled Actions workflow, and
+first-party Copilot app automations that accept a raw cron expression. But it
+supports **MCP tools only** — GitHub's docs state it does not support resources
+or prompts — and its "stdio" means stdio inside an ephemeral GitHub-hosted
+runner, not on the user's Mac. It cannot reach cigar-butt's 0600 credential file
+or its E\*TRADE token. The one exception is Copilot app **local** automations,
+which run on the user's machine on a cron; the docs imply MCP works there but
+never say so in one sentence.
+
+### B.3 OpenAI Codex CLI, and ChatGPT tasks
+
+**Codex CLI**: MCP via `~/.codex/config.toml` `[mcp_servers.*]`, **stdio and
+Streamable HTTP only** (SSE is not a documented Codex MCP transport).
+`codex exec --ask-for-approval never` runs headless with MCP servers loaded, and
+`--json` emits MCP tool calls as JSONL. Codex itself has **no scheduler** — the
+docs say so directly — so the timer must be OS cron or an Actions workflow via
+the official `openai/codex-action`.
+
+One detail that matters for any unattended design: elicitation is gated behind
+`approval_policy.granular.mcp_elicitations`, and under
+`approval_policy = "never"` **elicitation prompts are auto-rejected**. See B.9.
+
+**ChatGPT tasks/automations** split. The web surface is cloud-run with RRULE
+schedules but reaches only remote MCP connectors over SSE or streaming HTTP —
+explicitly no stdio, no localhost. The **desktop** app runs scheduled tasks
+locally against `~/.codex/config.toml`, so local stdio servers are present, but
+it requires the machine on and the app running.
+
+### B.4 Cursor
+
+MCP via `.cursor/mcp.json` / `~/.cursor/mcp.json`; stdio, SSE and Streamable
+HTTP with OAuth. Cursor publishes a capability table: tools, prompts, resources,
+roots, elicitation and MCP Apps supported; **sampling absent; resource
+subscriptions not mentioned**.
+
+Cursor **does** have first-party cron — Automations run cloud agents on a
+schedule and have an explicit "MCP server" tool. But cloud agents run in a
+remote VM, and Cursor's docs are clear that "stdio servers depend on the VM
+environment to execute" and that cloud agents support HTTP and stdio only ("SSE
+and `mcp-remote` are not supported"). A scheduled Automation therefore cannot
+reach a stdio server on the user's Mac. Cursor's Self-Hosted "My Machines"
+routes stdio to a named local machine, but the docs list only Slack, GitHub and
+Linear triggers as targeting it — schedules are not listed. **Unverified whether
+a scheduled Automation can target My Machines; assume not.**
+
+The working local path is the same as everywhere: OS cron plus
+`cursor-agent -p --force`, which respects `mcp.json`.
+
+### B.5 Windsurf / Cascade
+
+`~/.codeium/windsurf/mcp_config.json`; stdio, Streamable HTTP and SSE. Supports
+"tools, resources, and prompts" — sampling, elicitation, roots and resource
+subscriptions are not mentioned anywhere and should be treated as unsupported.
+A 100-tool ceiling across all servers.
+
+**No scheduling at all.** Workflows are documented as "manual-only — Cascade will
+never invoke a workflow automatically". Hooks (`pre_mcp_tool_use`,
+`post_mcp_tool_use`) are event-driven inside a live session and cannot start one.
+No headless mode is documented. (Devin cloud has cron automations, but those
+start cloud Devin sessions, not Cascade on the user's machine.)
+
+### B.6 Zed
+
+MCP as "context servers" in `settings.json`; stdio, plus remote HTTP with the
+standard MCP OAuth flow. Zed states its coverage plainly: it supports **tools and
+prompts only**, and welcomes contributions for "Discovery, Sampling,
+Elicitation". No resources, therefore no subscriptions. The one server-push it
+handles is `notifications/tools/list_changed`.
+
+**No scheduling**, no documented headless agent CLI.
+
+### B.7 Claude Desktop
+
+`claude_desktop_config.json` for local stdio, `.mcpb` Desktop Extensions, and
+remote connectors over Streamable HTTP or legacy HTTP+SSE. Its "Protocol
+features" page lists tools, prompts and resources as supported and — verbatim —
+**"Resource subscriptions", "Sampling"** and advanced/draft capabilities as _not_
+supported. Elicitation appears on neither list.
+
+Plain Desktop chat has **no scheduler**. **Cowork**, which ships inside Claude
+Desktop, does: `/schedule` with hourly/daily/weekly cadences on paid plans. The
+qualifier decides it — scheduled Cowork tasks "run remotely, so they run on their
+cadence even when your computer is asleep", and "if a scheduled task requires
+local files or apps, it will only run locally". The unattended path is the cloud
+one, and the cloud one cannot see a local stdio server.
+
+### B.8 Comparison
+
+| Host                    | MCP                       | Transports                   | Native scheduling                                  | Can fire an MCP tool with no human turn               | Can that reach a **local stdio** server                                                 |
+| ----------------------- | ------------------------- | ---------------------------- | -------------------------------------------------- | ----------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| **Claude Code**         | Yes                       | stdio, HTTP, SSE (dep.), WS  | `/loop` (session-scoped); cloud routines (1 h min) | Yes — `/loop`, routines, or `claude -p` under launchd | **Only** `claude -p` under launchd, or `/loop` with a terminal open. Cloud routines: no |
+| VS Code / Copilot       | Yes (richest)             | stdio, HTTP, SSE (legacy)    | None in the editor                                 | No                                                    | —                                                                                       |
+| Copilot cloud agent     | Tools only                | stdio (in runner), HTTP, SSE | Agentic Workflows, Actions cron, app automations   | Yes                                                   | No (runner-local stdio only); Copilot app _local_ automations are the one maybe         |
+| Codex CLI               | Yes                       | stdio, Streamable HTTP       | None                                               | Via OS cron / Actions with `codex exec`               | Yes, via OS cron                                                                        |
+| ChatGPT tasks (web)     | Remote connectors         | SSE, streaming HTTP          | RRULE cron                                         | Yes                                                   | No                                                                                      |
+| ChatGPT tasks (desktop) | Yes (shares Codex config) | stdio, HTTP                  | Local scheduled tasks                              | Yes, machine on + app running                         | Yes                                                                                     |
+| Cursor                  | Yes                       | stdio, SSE, HTTP             | **Automations** (real cron)                        | Yes                                                   | No — cloud VM. Local needs cron + `cursor-agent -p`                                     |
+| Windsurf                | Yes                       | stdio, HTTP, SSE             | **None**                                           | No                                                    | —                                                                                       |
+| Zed                     | Tools + prompts only      | stdio, remote HTTP           | **None**                                           | No                                                    | —                                                                                       |
+| Claude Desktop          | Yes                       | stdio, HTTP, SSE (legacy)    | None in chat; Cowork `/schedule`                   | Cowork: yes                                           | No (Cowork's unattended path is cloud)                                                  |
+
+### B.9 Three cross-cutting findings that constrain the design
+
+1. **No host documents resource subscriptions.** Not one of the eight claims
+   `resources/subscribe` or `notifications/resources/updated`. Claude Desktop
+   lists "Resource subscriptions" as explicitly unsupported; Zed has no resources
+   at all. The only server-push any of them documents handling is
+   `notifications/tools/list_changed`. So the MCP push channel from A.3 is not
+   merely weak in theory — it has **no host implementation to push to**. Design
+   for the client polling a tool.
+
+2. **Elicitation is incompatible with unattended scheduling, by construction.**
+   Codex states it outright: under `approval_policy = "never"`, MCP elicitation
+   prompts are auto-rejected. The same holds anywhere a scheduler runs with
+   approvals off. This is a direct constraint on cigar-butt: `requireSetup()` and
+   the `inputRequired` credential flow in `src/tools/setup.ts` must never be on
+   the path a scheduled run takes, or the run will hang or silently fail. The
+   scheduled path must fail loudly with a message instead of asking a question.
+
+3. **Sampling is dead.** Only VS Code documents it, and the 2026-07-28 spec
+   deprecates it (SEP-2577). Nothing should be built on it.
+
+The landscape splits on one axis: **where the agent loop runs.** Cloud-scheduled
+(Cursor Automations, Copilot cloud, ChatGPT web, Cowork, Agentic Workflows) is
+real cron with genuinely no human — and reaches only remote HTTP servers.
+Locally-scheduled (OS cron driving `claude -p`, `codex exec`, `cursor-agent -p`,
+`copilot -p`, or Copilot/ChatGPT local automations) reaches local stdio but needs
+the machine awake. Zed, Windsurf and plain Claude Desktop chat offer nothing.
+
+For a package that lives on the user's machine and holds their brokerage token,
+**the OS scheduler is the only portable answer** — and once that is true, going
+through an agent host at all is an extra dependency, which is what D.5 concludes.
+
 ---
 
 ## C. Alerting channels that actually work
@@ -537,6 +680,11 @@ Non-negotiable, and worth an explicit test each:
 - **Never fire on an undated or unresolvable figure.** If a quote could not be
   fetched, the run records `outcome = 'blind'` for that name and says so in
   `watch_status`. A watch that quietly stops watching is worse than no watch.
+- **Never ask a question on the scheduled path.** Per B.9, elicitation is
+  auto-rejected under every unattended approval policy. `requireSetup()` and the
+  `inputRequired` credential flow must not be reachable from `watch run`: a
+  missing credential ends the run with a recorded, alerted failure, not a form
+  nobody will ever see.
 - **Never widen `readOnlyHint`.** The MCP tools remain read-only against market
   and broker.
 - **Never write to stdout from anything the stdio entry can reach.** The watch
@@ -556,8 +704,15 @@ yesterday post a summary to my Slack webhook." \
   --mcp-config ~/.config/cigar-butt/mcp.json
 ```
 
-This is real and it is the runner-up option. Its limits are why it is not the
+This is real and it is the runner-up option. Two caveats even here: the run must
+not hit a tool that elicits (B.9), and `claude -p` will happily invent the
+comparison arithmetic rather than compute it, because nothing in the current tool
+set stores a reference price to compare against. Its limits are why it is not the
 shipped answer — see D.5.
+
+The equivalent works on other hosts with the same shape:
+`codex exec --ask-for-approval never`, `cursor-agent -p --force`,
+`copilot -p --no-ask-user`. All of them need the machine awake.
 
 ### D.4 Impossible, or requires a terminal to stay open
 
@@ -584,10 +739,30 @@ that run; and it makes the feature Claude-Code-specific, when the same npm
 package is installed in Cursor and Claude Desktop. `/loop` and cloud routines are
 worse still — one needs a terminal open, the other cannot see the local machine.
 
-**Option 3, streamable HTTP.** Analysed at A.5. It solves the timer and not the
-delivery, and it relocates brokerage tokens off the user's machine to do it. If a
-hosted multi-user cigar-butt is ever the goal this is the transport, but it is a
-different product and it does not deliver this feature.
+**Option 3, streamable HTTP.** Analysed at A.5. There is a real argument for it
+that the host survey makes plain: every cloud scheduler in B.8 — Cursor
+Automations, Copilot cloud automations, Agentic Workflows, ChatGPT web tasks,
+Cowork — can reach a remote HTTP server and none of them can reach a local stdio
+one, and a cloud scheduler does not care whether the laptop is awake. For a
+generic MCP server that argument would win.
+
+It loses here for three reasons specific to this one:
+
+- The thing being scheduled reads a **brokerage account**. Exposing it over HTTP
+  means the E\*TRADE access token lives on a host the user does not control, and
+  the endpoint needs OAuth or bearer auth before it is reachable at all.
+- The E\*TRADE token dies at midnight ET and can only be renewed by a human at a
+  browser. A cloud scheduler that runs while the laptop is off would spend most
+  of its runs discovering there is no valid token. The "machine must be awake"
+  objection largely evaporates when the credential requires a human at that
+  machine every morning anyway.
+- It still does not deliver an alert. A cloud-scheduled agent calling an HTTP
+  cigar-butt gets a tool result; getting that result to the user is still a
+  webhook or a push, which the recommended design does directly and without an
+  agent in the loop.
+
+If a hosted multi-user cigar-butt is ever the goal, this is the transport. It is
+a different product and it does not deliver this feature.
 
 **Option 4, tasks.** No runtime in the installed SDK (every symbol tagged
 `@deprecated … no SDK runtime`), now an out-of-core extension, poll-based, and
@@ -622,7 +797,38 @@ Repository:
 - `src/http/client.ts` — `redactUrl`'s actual coverage
 
 Local CLI (run on 2026-09-12): `claude --version` → 2.1.269;
-`claude --help`; `claude mcp --help`.
+`claude --help`; `claude mcp --help`. No other host is installed on this
+machine, so section B.2–B.7 is documentation-only.
+
+Host documentation (all vendor primary sources, read 2026-09-12):
+
+- VS Code: [MCP servers](https://code.visualstudio.com/docs/copilot/customization/mcp-servers),
+  [MCP developer guide](https://code.visualstudio.com/api/extension-guides/ai/mcp),
+  [agent sessions](https://code.visualstudio.com/learn/foundations/agent-sessions-and-where-agents-run)
+- GitHub: [coding agent MCP](https://docs.github.com/en/copilot/concepts/agents/coding-agent/mcp-and-coding-agent),
+  [Copilot CLI in Actions](https://docs.github.com/en/copilot/how-tos/copilot-cli/automate-copilot-cli/automate-with-actions),
+  [app automations](https://docs.github.com/en/copilot/how-tos/github-copilot-app/using-automations),
+  [Agentic Workflows](https://docs.github.com/en/copilot/concepts/agents/about-github-agentic-workflows)
+- Codex: [MCP](https://learn.chatgpt.com/docs/extend/mcp?surface=cli),
+  [config reference](https://learn.chatgpt.com/docs/config-file/config-reference),
+  [non-interactive mode](https://learn.chatgpt.com/docs/non-interactive-mode);
+  [ChatGPT automations](https://learn.chatgpt.com/docs/automations?surface=app)
+- Cursor: [MCP](https://cursor.com/docs/mcp),
+  [Automations](https://cursor.com/docs/cloud-agent/automations),
+  [cloud agent capabilities](https://cursor.com/docs/cloud-agent/capabilities),
+  [CLI headless](https://cursor.com/docs/cli/headless)
+- Windsurf/Cascade: [MCP](https://docs.devin.ai/desktop/cascade/mcp),
+  [workflows](https://docs.devin.ai/desktop/cascade/workflows)
+- Zed: [MCP](https://zed.dev/docs/ai/mcp)
+- Claude Desktop: [local MCP servers](https://support.claude.com/en/articles/10949351-getting-started-with-local-mcp-servers-on-claude-desktop),
+  [custom connectors](https://claude.com/docs/connectors/building),
+  [Cowork scheduled tasks](https://support.claude.com/en/articles/13854387-schedule-recurring-tasks-in-claude-cowork)
+
+Two citation traps found while checking: the per-client feature matrix formerly
+at `modelcontextprotocol.io/clients` **no longer exists** (it redirects to the
+intro page and is absent from `llms.txt`), and two vendors have moved their docs
+(`developers.openai.com/codex/*` → `learn.chatgpt.com/docs/*`;
+`docs.windsurf.com/*` → `docs.devin.ai/desktop/*`).
 
 ### D.7 Suggested build order
 

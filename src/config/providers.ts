@@ -174,10 +174,12 @@ export const PROVIDERS: readonly ProviderSpec[] = [
     id: 'fmp',
     label: 'Financial Modeling Prep',
     purpose:
-      'Quotes. Included because one key covers a lot and it extends the pool ' +
-      'when other free tiers are spent — not for its fundamentals, which are a ' +
-      'vendor normalisation of the EDGAR filings this server reads directly.',
-    rateLimit: '250 requests/day on the free tier',
+      'Quotes — but its free tier covers LARGE CAPS ONLY. Verified: AAPL and ' +
+      'MSFT answer, while small caps are refused with HTTP 402. That is a poor ' +
+      'fit for a small-cap deep-value screen, so expect it to serve almost ' +
+      'nothing unless you pay. Kept in the pool because a paid key has full ' +
+      'coverage and it costs nothing to leave configured.',
+    rateLimit: '250 requests/day; free tier restricted to large caps',
     requirement: 'one-of',
     signupUrl: 'https://site.financialmodelingprep.com/developer/docs'
   },

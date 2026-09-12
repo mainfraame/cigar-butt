@@ -53,11 +53,37 @@ const sleep = (ms: number): Promise<void> =>
  * Alpha Vantage and FRED take their key as a query parameter, so a URL can
  * carry a secret. Every message that names a URL goes through here first.
  */
+const SECRET_PARAMS = [
+  'apikey',
+  'api_key',
+  'apiKey',
+  'Subscription-Key',
+  'token'
+];
+
+/**
+ * Hosts that carry their credential in the URL **path** rather than a query
+ * parameter. A Slack webhook is `hooks.slack.com/services/T…/B…/<secret>`, so
+ * scrubbing query parameters alone would put the whole secret into an
+ * `HttpError` message the moment a POST failed.
+ */
+const SECRET_PATH_HOSTS = new Set([
+  'discord.com',
+  'discordapp.com',
+  'hooks.slack.com',
+  'maker.ifttt.com',
+  'ntfy.sh'
+]);
+
 export function redactUrl(url: URL): string {
   const copy = new URL(url.toString());
-  for (const key of ['apikey', 'api_key', 'apiKey', 'token']) {
+
+  for (const key of SECRET_PARAMS) {
     if (copy.searchParams.has(key)) copy.searchParams.set(key, 'REDACTED');
   }
+
+  if (SECRET_PATH_HOSTS.has(copy.hostname)) copy.pathname = '/REDACTED';
+
   return copy.toString();
 }
 

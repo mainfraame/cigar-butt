@@ -170,6 +170,22 @@ const alphavantage: Provider<Quote> = {
   }
 };
 
+/**
+ * Verified against a live free-tier key: FMP answers for large caps and
+ * refuses everything else with HTTP 402 and "this value set for 'symbol' is
+ * not available under your current subscription". AAPL and MSFT work; ASTE,
+ * HVT and NL do not.
+ *
+ * That is close to the worst possible fit for this server, which screens small
+ * caps almost exclusively — its free tier covers precisely the names this
+ * strategy never buys. It stays in the pool because it costs nothing to keep
+ * and a *paid* FMP key has full coverage, but it sits near the back and the
+ * registry says plainly not to expect much from the free tier.
+ *
+ * The refusal is per-symbol and permanent, not a quota, so it must NOT trigger
+ * a cooldown: one unsupported ticker would otherwise bench the provider for
+ * every other ticker too.
+ */
 const fmp: Provider<Quote> = {
   budgets: [{ limit: 250, per: 'day' }],
   id: 'fmp',
@@ -186,6 +202,15 @@ const fmp: Provider<Quote> = {
         searchParams: { apikey: key, symbol: ticker }
       }
     );
+    if (rows[0]?.price === undefined) {
+      throw bad(
+        'fmp',
+        ticker,
+        ": not covered by this plan. FMP's free tier serves large caps only, " +
+          'so most small caps a deep-value screen looks at are refused.'
+      );
+    }
+
     // FMP's quote carries no trade date, only a timestamp on some plans. The
     // honest as-of is today: claiming a date the payload does not contain is
     // exactly the failure this server exists to prevent.
@@ -335,8 +360,8 @@ const QUOTE_PROVIDERS: readonly Provider<Quote>[] = [
   polygon,
   finnhub,
   twelvedata,
-  fmp,
   alphavantage,
+  fmp,
   eodhd
 ];
 
