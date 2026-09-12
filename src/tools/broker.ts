@@ -1,10 +1,4 @@
-import {
-  acceptedContent,
-  inputRequired,
-  type CallToolResult,
-  type InputRequiredResult,
-  type McpServer
-} from '@modelcontextprotocol/server';
+import type { McpServer } from '@modelcontextprotocol/server';
 
 import { sortBy, uniq } from 'lodash-es';
 import * as z from 'zod/v4';
@@ -79,18 +73,6 @@ const accountArg = z
       'account id is accepted too, but a ref is unambiguous across brokers.'
   );
 
-const verifierForm = z.object({
-  verifier: z
-    .string()
-    .min(1)
-    .meta({
-      description:
-        'The code the broker displayed after you approved the application. ' +
-        'Usually five characters.',
-      title: 'Broker verification code'
-    })
-});
-
 const TOKEN_LIFECYCLE =
   'E*TRADE access tokens go idle after two hours without a request and expire ' +
   'outright at midnight US Eastern, no matter how recently they were used. ' +
@@ -132,7 +114,7 @@ export function registerBrokerTools(server: McpServer): void {
       }),
       title: 'Connect a brokerage account'
     },
-    (args, ctx): Promise<CallToolResult | InputRequiredResult> =>
+    args =>
       attempt(async () => {
         const target = resolveAuthorizable(args.broker);
         if ('message' in target) return text(target.message);
@@ -142,38 +124,22 @@ export function registerBrokerTools(server: McpServer): void {
 
         if (args.verifier) return finishConnect(id, adapter, args.verifier);
 
-        // A previous round of this same call may already carry the answer.
-        const answered = acceptedContent(
-          ctx.mcpReq.inputResponses,
-          'verifier',
-          verifierForm
-        );
-        if (answered?.verifier) {
-          return finishConnect(id, adapter, answered.verifier);
-        }
-
         const { instructions, url } = await authorize.begin();
-        const body = `Open this URL, log in, and approve the application:\n\n${url}\n\n${instructions}`;
 
-        // Not every client can prompt, and an unsupported elicitation is
-        // rejected when the result is serialised — after this handler has
-        // already returned, so it cannot be caught here. Check first and hand
-        // the URL back as text instead: the model relays it, the user reads the
-        // code back, and the second call completes the exchange.
-        if (server.server.getClientCapabilities()?.elicitation?.form) {
-          return inputRequired({
-            inputRequests: {
-              verifier: inputRequired.elicit({
-                message: `${body}\n\n${TOKEN_LIFECYCLE}`,
-                requestedSchema: verifierForm
-              })
-            }
-          });
-        }
-
+        // Deliberately NOT an elicitation, even where the client supports one.
+        //
+        // This flow sends the user out of the client entirely: open a browser,
+        // log in to the broker, approve the application, read a code back. That
+        // is far longer than any elicitation timeout, and when the prompt times
+        // out it takes the request token with it — the user comes back with a
+        // valid code and nothing left to redeem it against, having seen only
+        // "Request timed out". Handing the URL back as text costs one extra
+        // tool call and cannot expire mid-thought.
         return text(
-          `## Connect ${adapter.label()}\n\n${body}\n\n` +
-            `Then call \`broker_connect\` again with that code as \`verifier\`` +
+          `## Connect ${adapter.label()}\n\n` +
+            `Open this URL, log in, and approve the application:\n\n${url}\n\n` +
+            `${instructions}\n\n` +
+            'Then call `broker_connect` again with that code as `verifier`' +
             `${args.broker ? ` and \`broker: "${id}"\`` : ''}.\n\n` +
             TOKEN_LIFECYCLE
         );

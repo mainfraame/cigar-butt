@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { combinePositions, type AccountRef } from '../broker/aggregate.ts';
 import { dec, type Decimal } from '../math/decimal.ts';
-import { concentration, where } from './broker.ts';
+import { concentration, registerBrokerTools, where } from './broker.ts';
 
 const d = (value: string): Decimal => dec(value)!;
 
@@ -112,5 +112,38 @@ describe('where', () => {
     ]);
 
     expect(where(position!)).toBe('707004180');
+  });
+});
+
+function handler(elicitation: boolean) {
+  const handlers = new Map<string, Function>();
+  registerBrokerTools({
+    registerTool: (name: string, _config: unknown, run: Function) => {
+      handlers.set(name, run);
+    },
+    server: {
+      getClientCapabilities: () =>
+        elicitation ? { elicitation: { form: {} } } : {}
+    }
+  } as never);
+  return handlers.get('broker_connect')!;
+}
+
+describe('broker_connect', () => {
+  it('hands back a URL rather than eliciting, even where the client can prompt', async () => {
+    // The flow leaves the client entirely — browser, login, approve, read a
+    // code back — which outlasts any elicitation timeout. When the prompt
+    // times out it takes the request token with it, so the user returns with
+    // a valid code and nothing to redeem it against.
+    const result = await handler(true)({ broker: 'alpaca' }, { mcpReq: {} });
+
+    expect(result.resultType).toBeUndefined();
+    expect(result.content?.[0]?.text).toBeTypeOf('string');
+  });
+
+  it('says a static-key broker needs no authorization at all', async () => {
+    const result = await handler(false)({ broker: 'alpaca' }, { mcpReq: {} });
+
+    expect(result.content?.[0]?.text).toContain('needs no authorization');
   });
 });
