@@ -32,6 +32,21 @@ import { attempt, cell, DISCLAIMER, pct, text, usd } from './shared.ts';
 
 const DAY = 86_400;
 
+/** The armed directions, in words rather than an em-dash in a slash pair. */
+function describeThresholds(
+  upPct: number | undefined,
+  downPct: number | undefined
+): string {
+  if (upPct !== undefined && downPct !== undefined) {
+    return `a rise of ${upPct}% or a fall of ${downPct}%`;
+  }
+  if (upPct !== undefined) return `a rise of ${upPct}%; falls ignored`;
+  if (downPct !== undefined) return `a fall of ${downPct}%; rises ignored`;
+  // The schema should stop this, so say plainly that it will never fire
+  // rather than print an empty threshold pair that looks armed.
+  return 'no threshold set, so it can never fire';
+}
+
 export function registerWatchTools(server: McpServer): void {
   server.registerTool(
     'watch_status',
@@ -279,8 +294,10 @@ export function registerWatchTools(server: McpServer): void {
           return Promise.resolve(
             text(
               `Armed **${args.id}** on ${args.ticker?.toUpperCase() ?? 'every held name'}: ` +
-                `${args.upPct ? `+${args.upPct}%` : '—'} / ` +
-                `${args.downPct ? `-${args.downPct}%` : '—'}, ` +
+                // A bare "—" belongs in a table cell under a column heading
+                // that explains it. In a sentence it reads as a rendering
+                // fault, and a rule that ignores one direction should say so.
+                `${describeThresholds(args.upPct, args.downPct)}, ` +
                 `${args.cooldownHours}h cooldown, via ${args.channels.join(', ')}.\n\n` +
                 'The first poll after arming records a reference price rather than ' +
                 'firing — a rule must not alarm on a move it never watched.\n\n' +

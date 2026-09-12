@@ -19,6 +19,23 @@ import { type Decimal, dec, div, gtZero, ZERO } from '../math/decimal.ts';
 
 export interface ScreenRow {
   readonly assetsCurrent?: Decimal;
+  /**
+   * True when NCAV came out above tangible book, which cannot happen on a
+   * consistently drawn balance sheet.
+   *
+   * NCAV is equity less non-current assets; tangible book is equity less
+   * goodwill and intangibles; and goodwill and intangibles *are* non-current
+   * assets. So NCAV can never exceed tangible book — unless the two figures
+   * are drawn from different bases, which is what happens with a
+   * non-controlling interest: `StockholdersEquity` is the parent's share
+   * alone, while `AssetsCurrent` and `Liabilities` are the whole consolidated
+   * group. Up-C structures (Viant, TWFG) do this by construction.
+   *
+   * The ratio is then an artifact of the mismatch rather than a measure of
+   * anything, and because it is large it sorts to the very top of the screen —
+   * exactly where a reader's attention goes.
+   */
+  readonly basisInconsistent: boolean;
   readonly cik: number;
   readonly entityName: string;
   readonly goodwill: Decimal;
@@ -98,17 +115,18 @@ export async function screenMarket(
         ? currentAssetsValue.minus(liabilitiesValue)
         : undefined;
 
+    const ratio = gtZero(tangibleBook) ? div(ncav, tangibleBook) : undefined;
+
     rows.push({
       assetsCurrent: currentAssetsValue,
+      basisInconsistent: ratio !== undefined && ratio.gt(1),
       cik,
       entityName: equityEntry.entityName,
       goodwill: goodwillValue,
       intangibles: intangiblesValue,
       liabilities: liabilitiesValue,
       ncav,
-      ncavToTangibleBook: gtZero(tangibleBook)
-        ? div(ncav, tangibleBook)
-        : undefined,
+      ncavToTangibleBook: ratio,
       periodEnd: equityEntry.end,
       stockholdersEquity: equityValue,
       tangibleBook
@@ -135,8 +153,16 @@ export async function screenMarket(
   // Ranked by how much of tangible book is net current assets: the higher the
   // ratio, the closer the company is to being worth its liquid balance sheet
   // alone, which is the Graham end of the spectrum.
+  //
+  // Rows whose two figures came from different bases sort after every real
+  // one. They are kept — a genuine net-net with a minority interest is still
+  // worth looking at — but their ratio is not a measurement, so letting it
+  // outrank a measured one would put an artifact at the top of the page.
   return {
-    rows: sortBy(filtered, row => -(row.ncavToTangibleBook?.toNumber() ?? 0)),
+    rows: sortBy(filtered, [
+      row => (row.basisInconsistent ? 1 : 0),
+      row => -(row.ncavToTangibleBook?.toNumber() ?? 0)
+    ]),
     universeSize
   };
 }

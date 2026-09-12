@@ -375,7 +375,9 @@ export function registerPortfolioTools(server: McpServer): void {
         const table = shown
           .map(
             row =>
-              `| ${row.entityName} | ${row.cik} | ${usd(out(row.tangibleBook, 0))} | ${usd(out(row.ncav, 0))} | ${pct(out(row.ncavToTangibleBook))} | ${row.periodEnd} |`
+              `| ${row.entityName} | ${row.cik} | ${usd(out(row.tangibleBook, 0))} | ` +
+              `${usd(out(row.ncav, 0))} | ${pct(out(row.ncavToTangibleBook))}` +
+              `${row.basisInconsistent ? ' ⚠' : ''} | ${row.periodEnd} |`
           )
           .join('\n');
 
@@ -388,6 +390,19 @@ export function registerPortfolioTools(server: McpServer): void {
             'here says a name is cheap — only that its balance sheet is the right ' +
             'shape. Run `check_disqualifiers` and then `analyze_ticker` on each name ' +
             'before it goes anywhere near a portfolio.\n\n' +
+            (shown.some(row => row.basisInconsistent)
+              ? '⚠ **A ratio above 100% is not a measurement.** NCAV cannot exceed ' +
+                'tangible book on a consistently drawn balance sheet — NCAV is ' +
+                'equity less non-current assets, tangible book is equity less ' +
+                'goodwill and intangibles, and those are non-current assets. ' +
+                'Above 100% means the two figures came from different bases, ' +
+                'almost always a non-controlling interest: `StockholdersEquity` ' +
+                "is the parent's share alone while assets and liabilities are the " +
+                'whole consolidated group, which is how an Up-C is built. Those ' +
+                'rows sort last here for that reason. They are not disqualified — ' +
+                'read the actual balance sheet with `analyze_ticker`, which pins ' +
+                'every line item to one filing.\n\n'
+              : '') +
             (rows.length < 15
               ? 'Fewer than 15 names cleared. Asset-based screens empty out after a ' +
                 'broad rally, and the universe may simply not contain enough ' +
