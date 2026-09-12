@@ -90,6 +90,26 @@ describe('isoDate', () => {
     expect(isoDate('09/11/2026')).toBe('2026-09-11');
   });
 
+  it('pads the House Clerk\u2019s unpadded M/D/YYYY', () => {
+    // The Senate pads and the House does not. An unpadded date left alone
+    // makes every downstream comparison a string comparison against an ISO
+    // cutoff, where '9/9/2026' < '2026-07-14' is false because '9' beats '2'.
+    expect(isoDate('9/9/2026')).toBe('2026-09-09');
+    expect(isoDate('3/31/2026')).toBe('2026-03-31');
+    expect(isoDate('12/1/2026')).toBe('2026-12-01');
+  });
+
+  it('sorts and compares correctly once padded', () => {
+    const dates = ['9/2/2026', '9/10/2026', '9/1/2026'].map(isoDate);
+
+    expect(dates.toSorted()).toEqual([
+      '2026-09-01',
+      '2026-09-02',
+      '2026-09-10'
+    ]);
+    expect(dates.filter(date => date >= '2026-09-02')).toHaveLength(2);
+  });
+
   it('leaves an unrecognised value alone rather than inventing a date', () => {
     expect(isoDate('--')).toBe('--');
     expect(isoDate('2026-09-11')).toBe('2026-09-11');

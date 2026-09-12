@@ -200,9 +200,24 @@ function tableRows(table: HTMLElement | null | undefined): string[][] {
 }
 
 /** MM/DD/YYYY → ISO, so dates sort and compare like every other date here. */
+const pad2 = (part: string): string => part.padStart(2, '0');
+
+/**
+ * `M/D/YYYY` or `MM/DD/YYYY` to ISO, padding as needed.
+ *
+ * The padding is the point. The Senate's eFD zero-pads and the House Clerk
+ * does not, so a regex demanding two digits silently returned `9/9/2026`
+ * unchanged — and every date comparison downstream is a string comparison
+ * against an ISO cutoff. `'9/9/2026' < '2026-07-14'` is false because `'9'`
+ * beats `'2'`, so a filing-date window kept essentially everything and sorted
+ * 9/10 in among the 9/1s. An unparseable value is still returned as-is; there
+ * is nothing better to do with it, and it will look wrong rather than sort
+ * wrong.
+ */
 export function isoDate(value: string): string {
-  const match = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(value.trim());
-  return match ? `${match[3]}-${match[1]}-${match[2]}` : value.trim();
+  const match = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(value.trim());
+  if (!match) return value.trim();
+  return `${match[3]}-${pad2(match[1]!)}-${pad2(match[2]!)}`;
 }
 
 /** `--` is eFD's null. A dash is not a ticker. */
