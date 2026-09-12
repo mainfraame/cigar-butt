@@ -283,6 +283,9 @@ describe('accounts', () => {
         id: '36b6db2e-1c50-4117-ac20-e35b0b972a38',
         number: 'PA32F0I978PS',
         status: 'ACTIVE',
+        // Unconditionally unknown: the Trading API carries no registration
+        // field, and assuming a paper key means taxable would fabricate a cost.
+        taxTreatment: 'unknown',
         type: 'PAPER'
       }
     ]);
@@ -412,8 +415,39 @@ describe('positions', () => {
 
     expect(positions).toHaveLength(1);
     expect(positions[0]?.shares.toString()).toBe('6');
+    // Basis and gain are dropped when a long is netted against a short: the
+    // legs were opened for opposite reasons, and a combined "cost" of the net
+    // position is not a quantity that exists.
+    expect(positions[0]?.costBasis).toBeUndefined();
+    expect(positions[0]?.unrealisedGain).toBeUndefined();
+  });
+
+  it('sums basis across lots pointing the same way', async () => {
+    unscopedPaperKeys();
+    stubFetch({
+      '/v2/clock': CLOCK,
+      '/v2/positions': [
+        {
+          cost_basis: '100',
+          current_price: '11',
+          qty: '10',
+          symbol: 'MSFT',
+          unrealized_pl: '10'
+        },
+        {
+          cost_basis: '250',
+          current_price: '11',
+          qty: '20',
+          symbol: 'MSFT',
+          unrealized_pl: '6'
+        }
+      ]
+    });
+
+    const positions = await alpacaAdapter.positions('any');
+    expect(positions[0]?.shares.toString()).toBe('30');
     expect(positions[0]?.costBasis?.toString()).toBe('350');
-    expect(positions[0]?.unrealisedGain?.toString()).toBe('4');
+    expect(positions[0]?.unrealisedGain?.toString()).toBe('16');
   });
 
   it('keeps an undefined cost basis undefined', async () => {

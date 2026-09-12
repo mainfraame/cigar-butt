@@ -61,6 +61,9 @@ Rules that hold regardless of what the user asks for:
   up empty, that is a real finding — say so, and offer \`edinet_search\` rather
   than loosening filters until something qualifies.
 - Flag correlation. Four shipping names in a 20-name book is not four bets.
+- Never state a tax liability, a tax rate, or a short/long-term
+  characterisation. An account whose tax treatment reads \`unknown\` is
+  undetermined — do NOT read it as taxable, and do not fill the gap yourself.
 - This is not investment advice, and the server is not a financial advisor.
 `.trim();
 

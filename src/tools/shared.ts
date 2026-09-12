@@ -101,3 +101,21 @@ export const DISCLAIMER =
   '\n\n---\n*Not investment advice. This tool reports figures from public ' +
   'filings and market data; it does not know your circumstances, and a screen ' +
   'is not diligence. Verify every figure against the filing before acting.*';
+
+/**
+ * Appended above `DISCLAIMER` on any tool that prints a tax classification or a
+ * gain figure.
+ *
+ * The boundary is the same as the investment one and drawn for the same reason:
+ * this server may state what a broker records, and may do arithmetic on two
+ * figures it was given, but it may not compute a liability. Holding period,
+ * wash sales and basis adjustments are not modelled, and a number that looks
+ * like a tax bill would be believed as one.
+ */
+export const TAX_NOTE =
+  '\n\n*Not tax advice. Account classification and cost basis are reported as ' +
+  'your broker records them, not computed here, and may differ from the basis ' +
+  'on your 1099-B. Gain figures are arithmetic, not a tax liability: holding ' +
+  'period, wash sales, basis adjustments and your own circumstances are not ' +
+  'modelled. Confirm against your broker\u2019s records and a tax professional ' +
+  'before acting.*';

@@ -13,6 +13,7 @@ import {
   type BrokerAdapter,
   type BrokerEnvironment
 } from './contract.ts';
+import { etradeTaxTreatment } from './tax.ts';
 
 /** E*TRADE says sandbox and production; the contract says test and live. */
 const toEtrade = (env: BrokerEnvironment): 'production' | 'sandbox' =>
@@ -33,6 +34,10 @@ export const etradeAdapter: BrokerAdapter = {
       id: account.accountIdKey,
       number: account.accountId,
       status: account.accountStatus,
+      taxTreatment: etradeTaxTreatment(
+        account.accountType,
+        account.accountMode
+      ),
       type: account.accountType
     })),
 

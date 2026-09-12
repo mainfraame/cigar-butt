@@ -1,5 +1,6 @@
 import { groupBy, keyBy, sortBy, sumBy } from 'lodash-es';
 
+import { realisesGain, type TaxTreatment } from '../broker/contract.ts';
 import {
   Decimal,
   dec,
@@ -22,6 +23,8 @@ import {
 interface Holding {
   /** ISO date of `price`. */
   readonly asOf: string;
+  /** Broker-reported aggregate basis. Absent means the broker did not supply one. */
+  readonly costBasis?: Decimal;
   /** Price the position is currently marked at. */
   readonly price: Decimal;
   readonly shares: Decimal;
@@ -47,14 +50,36 @@ export interface RebalanceInput {
   /** Don't emit an order whose notional is below this. Default 0. */
   readonly minTradeValue?: Decimal;
   readonly targets: readonly TargetWeight[];
+  /**
+   * How a sale in this account is taxed. Omit when unknown — never default it
+   * to `taxable`, which would fabricate a cost the data does not support.
+   */
+  readonly taxTreatment?: TaxTreatment;
 }
 
 export interface Order {
   readonly asOf: string;
+  /** Broker-reported basis for the whole position, when supplied. */
+  readonly costBasis?: number;
   readonly currentShares: number;
   readonly currentValue: number;
   readonly driftFraction: number;
   readonly estimatedProceeds: number;
+  /**
+   * `estimatedProceeds − costBasis`, on a FULL exit only, and only when the
+   * account is taxable and the basis is known.
+   *
+   * A full exit is lot-independent: every lot goes, so the figure is exact
+   * whatever basis method the account uses. A partial sell is deliberately left
+   * absent rather than estimated — the gain depends on *which* shares go, and
+   * the tempting pro-rata shortcut is average cost, which is not a permitted
+   * basis method for individual equities at all. An inadmissible method's
+   * output has no defensible label.
+   *
+   * Absent means "not computed", never zero. Not a tax figure: no fees, no
+   * wash-sale or basis adjustment, no holding-period split.
+   */
+  readonly gainOnExit?: number;
   readonly price: number;
   readonly shares: number;
   readonly side: 'buy' | 'sell';
@@ -102,8 +127,23 @@ function mergeHoldings(holdings: readonly Holding[]): Holding[] {
       const newest = sortBy(lots, lot => lot.asOf).at(-1);
       /* c8 ignore next -- groupBy never produces an empty group. */
       if (!newest) throw new Error('empty holding group');
+      // Basis sums only when the lots point the same way. Netting a long
+      // against a short would produce a "cost" for a position nobody bought as
+      // one, so the aggregate is dropped rather than made up.
+      const opposed =
+        lots.some(lot => lot.shares.isNegative()) &&
+        lots.some(lot => !lot.shares.isNegative());
+      const known = lots.filter(lot => lot.costBasis !== undefined);
+
       return {
         asOf: newest.asOf,
+        costBasis:
+          opposed || known.length === 0
+            ? undefined
+            : known.reduce<Decimal>(
+                (total, lot) => total.plus(lot.costBasis ?? ZERO),
+                ZERO
+              ),
         price: newest.price,
         shares: lots.reduce((total, lot) => total.plus(lot.shares), ZERO),
         ticker: newest.ticker
@@ -241,12 +281,24 @@ export function planRebalance(input: RebalanceInput): RebalancePlan {
       continue;
     }
 
+    // Exact only because the whole position goes: every lot is sold, so the
+    // figure holds whatever basis method the account uses.
+    const fullExit = targetShares.isZero() && gtZero(currentShares);
+    const gainOnExit =
+      fullExit &&
+      holding?.costBasis &&
+      realisesGain(input.taxTreatment ?? 'unknown')
+        ? currentValue.minus(holding.costBasis)
+        : undefined;
+
     const order: Order = {
       asOf,
+      costBasis: money(holding?.costBasis),
       currentShares: out(currentShares, allowFractionalShares ? 4 : 0) ?? 0,
       currentValue: money(currentValue) ?? 0,
       driftFraction: out(drift) ?? 0,
       estimatedProceeds: money(notional) ?? 0,
+      gainOnExit: money(gainOnExit),
       price: money(price) ?? 0,
       shares: out(shareDelta.abs(), allowFractionalShares ? 4 : 0) ?? 0,
       side: gtZero(shareDelta) ? 'buy' : 'sell',

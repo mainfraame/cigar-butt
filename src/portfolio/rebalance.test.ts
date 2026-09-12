@@ -10,6 +10,19 @@ const holding = (ticker: string, shares: number, price: number) => ({
   ticker
 });
 
+const withBasis = (
+  ticker: string,
+  shares: number,
+  price: number,
+  basis: number
+) => ({
+  asOf: '2026-09-11',
+  costBasis: new Decimal(basis),
+  price: new Decimal(price),
+  shares: new Decimal(shares),
+  ticker
+});
+
 const target = (ticker: string, weight: number, price: number) => ({
   asOf: '2026-09-11',
   price: new Decimal(price),
@@ -177,5 +190,104 @@ describe('duplicate lots', () => {
     });
 
     expect(plan.portfolioValue).toBe(400);
+  });
+});
+
+describe('gain on exit', () => {
+  it('computes the gain on a full exit in a taxable account', () => {
+    // A full exit is lot-independent: every lot goes, so proceeds minus basis
+    // is exact whatever basis method the account uses.
+    const plan = planRebalance({
+      availableCash: new Decimal(0),
+      holdings: [
+        withBasis('KEEP', 100, 10, 500),
+        withBasis('DROP', 50, 10, 300)
+      ],
+      targets: [target('KEEP', 1, 10)],
+      taxTreatment: 'taxable'
+    });
+
+    // 50 shares at 10 = 500 proceeds, against 300 of basis.
+    expect(plan.exits[0]?.gainOnExit).toBe(200);
+  });
+
+  it('leaves a partial sell uncomputed rather than pro-rating', () => {
+    // The gain depends on which shares go, and average cost is not a permitted
+    // basis method for individual equities — a pro-rata figure would have no
+    // defensible label.
+    const plan = planRebalance({
+      availableCash: new Decimal(0),
+      holdings: [
+        withBasis('AAA', 100, 20, 500),
+        withBasis('BBB', 100, 10, 500)
+      ],
+      targets: [target('AAA', 0.5, 20), target('BBB', 0.5, 10)],
+      taxTreatment: 'taxable'
+    });
+
+    expect(plan.sells).toHaveLength(1);
+    expect(plan.sells[0]?.gainOnExit).toBeUndefined();
+  });
+
+  it('computes nothing in a sheltered account, where no gain is realised', () => {
+    for (const taxTreatment of [
+      'roth',
+      'tax-deferred',
+      'tax-sheltered'
+    ] as const) {
+      const plan = planRebalance({
+        availableCash: new Decimal(0),
+        holdings: [
+          withBasis('KEEP', 100, 10, 500),
+          withBasis('DROP', 50, 10, 300)
+        ],
+        targets: [target('KEEP', 1, 10)],
+        taxTreatment
+      });
+
+      expect(plan.exits[0]?.gainOnExit).toBeUndefined();
+    }
+  });
+
+  it('computes nothing when the treatment is unknown', () => {
+    // `unknown` is not a synonym for taxable. Producing a gain figure here
+    // would assert a tax status the broker never reported.
+    const plan = planRebalance({
+      availableCash: new Decimal(0),
+      holdings: [
+        withBasis('KEEP', 100, 10, 500),
+        withBasis('DROP', 50, 10, 300)
+      ],
+      targets: [target('KEEP', 1, 10)]
+    });
+
+    expect(plan.exits[0]?.gainOnExit).toBeUndefined();
+  });
+
+  it('computes nothing when the broker supplied no basis', () => {
+    const plan = planRebalance({
+      availableCash: new Decimal(0),
+      holdings: [holding('KEEP', 100, 10), holding('DROP', 50, 10)],
+      targets: [target('KEEP', 1, 10)],
+      taxTreatment: 'taxable'
+    });
+
+    expect(plan.exits[0]?.gainOnExit).toBeUndefined();
+  });
+
+  it('drops basis when netting a long against a short', () => {
+    // Summing basis across opposed legs describes a position nobody bought.
+    const plan = planRebalance({
+      availableCash: new Decimal(0),
+      holdings: [
+        withBasis('AAA', 100, 10, 500),
+        withBasis('AAA', -40, 10, 200)
+      ],
+      targets: [],
+      taxTreatment: 'taxable'
+    });
+
+    expect(plan.exits[0]?.costBasis).toBeUndefined();
+    expect(plan.exits[0]?.gainOnExit).toBeUndefined();
   });
 });

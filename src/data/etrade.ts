@@ -34,6 +34,7 @@ export interface EtradeAccount {
   readonly accountId: string;
   /** The opaque key every other endpoint is addressed by — not `accountId`. */
   readonly accountIdKey: string;
+  readonly accountMode: string;
   readonly accountName: string;
   readonly accountStatus: string;
   readonly accountType: string;
@@ -716,6 +717,12 @@ interface RawAccount {
   accountDesc?: string;
   accountId?: string;
   accountIdKey?: string;
+  /**
+   * "IRA" or "CASH". The only field that reliably distinguishes retirement
+   * money when `accountType` returns a settlement mode instead of a
+   * registration — see `etradeTaxTreatment`.
+   */
+  accountMode?: string;
   accountName?: string;
   accountStatus?: string;
   accountType?: string;
@@ -779,6 +786,7 @@ export async function listAccounts(): Promise<EtradeAccount[]> {
     accountDesc: account.accountDesc ?? '',
     accountId: account.accountId ?? '',
     accountIdKey: account.accountIdKey ?? '',
+    accountMode: account.accountMode ?? '',
     accountName: account.accountName ?? '',
     accountStatus: account.accountStatus ?? '',
     accountType: account.accountType ?? '',

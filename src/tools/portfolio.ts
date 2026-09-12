@@ -8,9 +8,11 @@ import { allocate } from '../portfolio/allocate.ts';
 import { planRebalance } from '../portfolio/rebalance.ts';
 import {
   attempt,
+  cell,
   DISCLAIMER,
   pct,
   requireCapabilities,
+  TAX_NOTE,
   text,
   usd
 } from './shared.ts';
@@ -18,19 +20,33 @@ import {
 import type { Order } from '../portfolio/rebalance.ts';
 
 /** Renders one side of a rebalance plan; empty sections are omitted entirely. */
-function orderTable(title: string, orders: readonly Order[]): string {
+function orderTable(
+  title: string,
+  orders: readonly Order[],
+  { withGain = false }: { withGain?: boolean } = {}
+): string {
   if (orders.length === 0) return '';
+
   const rows = orders
-    .map(
-      order =>
-        `| ${order.ticker} | ${order.shares} | ${usd(order.price)} | ${usd(order.estimatedProceeds)} | ${usd(order.currentValue)} | ${usd(order.targetValue)} | ${pct(order.driftFraction)} | ${order.asOf} |`
-    )
+    .map(order => {
+      const base =
+        `| ${order.ticker} | ${order.shares} | ${usd(order.price)} | ` +
+        `${usd(order.estimatedProceeds)} | ${usd(order.currentValue)} | ` +
+        `${usd(order.targetValue)} | ${pct(order.driftFraction)} | ${order.asOf} |`;
+      return withGain
+        ? `${base} ${cell(order.costBasis === undefined ? undefined : usd(order.costBasis))} | ` +
+            `${cell(order.gainOnExit === undefined ? undefined : usd(order.gainOnExit))} |`
+        : base;
+    })
     .join('\n');
-  return (
-    `### ${title}\n\n` +
-    '| Ticker | Shares | Price | Notional | Now | Target | Drift | As of |\n' +
-    `|---|---|---|---|---|---|---|---|\n${rows}\n\n`
-  );
+
+  const head = withGain
+    ? '| Ticker | Shares | Price | Notional | Now | Target | Drift | As of | Cost basis | Gain |\n' +
+      '|---|---|---|---|---|---|---|---|---|---|\n'
+    : '| Ticker | Shares | Price | Notional | Now | Target | Drift | As of |\n' +
+      '|---|---|---|---|---|---|---|---|\n';
+
+  return `### ${title}\n\n${head}${rows}\n\n`;
 }
 
 const isoDate = z
@@ -59,6 +75,16 @@ const candidateSchema = z.object({
 
 const holdingSchema = z.object({
   asOf: isoDate,
+  costBasis: z
+    .number()
+    .nonnegative()
+    .finite()
+    .optional()
+    .describe(
+      'What the whole position cost, as the broker records it. Omit when ' +
+        'unknown — it is only used to state the gain on a full exit, and a ' +
+        'guessed basis would produce a figure nobody could check.'
+    ),
   price: positiveMoney.describe('Price the position is currently marked at.'),
   shares: z.number().nonnegative().finite(),
   ticker: z.string().min(1).max(10)
@@ -190,7 +216,15 @@ export function registerPortfolioTools(server: McpServer): void {
           .finite()
           .default(0)
           .describe('Suppress orders whose notional is below this.'),
-        targets: z.array(targetSchema).max(500)
+        targets: z.array(targetSchema).max(500),
+        taxTreatment: z
+          .enum(['roth', 'tax-deferred', 'tax-sheltered', 'taxable', 'unknown'])
+          .default('unknown')
+          .describe(
+            'How a sale in this account is taxed. `etrade_accounts` reports it. ' +
+              'Leave `unknown` if you do not know — it is NOT a synonym for ' +
+              'taxable, and claiming taxable would fabricate a cost.'
+          )
       }),
       title: 'Plan a rebalance'
     },
@@ -203,6 +237,7 @@ export function registerPortfolioTools(server: McpServer): void {
             driftTolerance: dec(args.driftTolerance) ?? ZERO,
             holdings: args.holdings.map(holding => ({
               asOf: holding.asOf,
+              costBasis: dec(holding.costBasis),
               price: dec(holding.price) ?? ZERO,
               shares: dec(holding.shares) ?? ZERO,
               ticker: holding.ticker.toUpperCase()
@@ -213,7 +248,8 @@ export function registerPortfolioTools(server: McpServer): void {
               price: dec(target.price) ?? ZERO,
               ticker: target.ticker.toUpperCase(),
               weight: dec(target.weight) ?? ZERO
-            }))
+            })),
+            taxTreatment: args.taxTreatment
           });
 
           return Promise.resolve(
@@ -221,7 +257,9 @@ export function registerPortfolioTools(server: McpServer): void {
               `## Rebalance plan\n\n` +
                 `Portfolio value ${usd(plan.portfolioValue)} including ${usd(args.availableCash)} cash.\n\n` +
                 orderTable('Sell', plan.sells) +
-                orderTable('Exit (held, not in targets)', plan.exits) +
+                orderTable('Exit (held, not in targets)', plan.exits, {
+                  withGain: true
+                }) +
                 orderTable('Buy', plan.buys) +
                 `Net cash flow ${usd(plan.netCashFlow)}; cash after execution ${usd(plan.cashAfter)}.\n\n` +
                 (plan.unchanged.length > 0
@@ -235,10 +273,23 @@ export function registerPortfolioTools(server: McpServer): void {
                 (plan.notes.length > 0
                   ? `### Notes\n\n${plan.notes.map(note => `- ${note}`).join('\n')}\n\n`
                   : '') +
+                (plan.exits.some(order => order.gainOnExit !== undefined)
+                  ? 'The gain column appears on full exits only. Every lot goes, ' +
+                    'so the figure is exact whatever basis method the account ' +
+                    'uses. It is deliberately absent on partial sells: the gain ' +
+                    'depends on which shares go, and average cost is not a ' +
+                    'permitted basis method for individual equities, so a ' +
+                    'pro-rata number would have no defensible meaning.\n\n'
+                  : args.taxTreatment === 'unknown'
+                    ? 'No gain figures: the account\u2019s tax treatment was not ' +
+                      'given. `unknown` is not taken to mean taxable — that ' +
+                      'would fabricate a cost. `etrade_accounts` reports it.\n\n'
+                    : '') +
                 'Execute the sells before the buys. Selling is the harder half of ' +
                 'this method: a name that has closed its discount has done its job, ' +
                 'and holding it past that point is a different decision than the one ' +
                 'that bought it.' +
+                TAX_NOTE +
                 DISCLAIMER
             )
           );

@@ -272,6 +272,12 @@ export const alpacaAdapter: BrokerAdapter = {
         id: account.id ?? account.account_number ?? 'default',
         number: account.account_number ?? '',
         status: account.status ?? 'UNKNOWN',
+        // Unconditionally `unknown`: this adapter is built on Alpaca's Trading
+        // API, whose /v2/account carries no registration field at all. Only the
+        // Broker API distinguishes an IRA from a taxable account. A future
+        // author must not "fix" this by assuming a paper key means taxable —
+        // that would fabricate a tax cost the data does not support.
+        taxTreatment: 'unknown' as const,
         type: paper ? 'PAPER' : 'BROKERAGE'
       }
     ];

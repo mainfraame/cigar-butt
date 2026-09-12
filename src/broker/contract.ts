@@ -35,6 +35,40 @@ import type { Decimal } from '../math/decimal.ts';
  */
 export type BrokerEnvironment = 'live' | 'test';
 
+/**
+ * How a sale in this account is taxed.
+ *
+ * The question this answers, and the only one, is: does selling here realise a
+ * currently reportable capital gain? `taxable` says yes; `roth`,
+ * `tax-deferred` and `tax-sheltered` say no; `unknown` says the broker did not
+ * tell us.
+ *
+ * `unknown` is not a synonym for `taxable`. Defaulting an undetermined account
+ * to taxable fabricates a cost; defaulting it to sheltered hides one. Neither
+ * is a claim this server is entitled to make, so it gets its own value and the
+ * output says so in words.
+ */
+export type TaxTreatment =
+  /** Roth IRA, Roth Individual K, Coverdell ESA, HSA — post-tax in, untaxed out. */
+  | 'roth'
+  /** Traditional / rollover / SEP / SIMPLE IRA, 401(k), profit sharing. */
+  | 'tax-deferred'
+  /** Retirement money whose flavour the broker did not disclose. */
+  | 'tax-sheltered'
+  | 'taxable'
+  | 'unknown';
+
+/**
+ * Whether a sale here realises a reportable gain.
+ *
+ * `undefined` for `unknown` — the three-state convention, not a boolean. A
+ * caller that collapses this to false understates the cost of a plan.
+ */
+export function realisesGain(treatment: TaxTreatment): boolean | undefined {
+  if (treatment === 'unknown') return undefined;
+  return treatment === 'taxable';
+}
+
 /** A netted position in one security. */
 export interface Position {
   /** ISO date `price` is as of. Never the time it was read. */
@@ -69,6 +103,12 @@ export interface BrokerAccount {
   /** What a human would recognise. May be masked. */
   readonly number: string;
   readonly status: string;
+  /**
+   * Never optional and never defaulted. An adapter that cannot determine this
+   * returns `unknown`, which is a different claim from `taxable`.
+   */
+  readonly taxTreatment: TaxTreatment;
+  /** The broker's own word, unchanged. `taxTreatment` is derived from it. */
   readonly type: string;
 }
 
@@ -138,13 +178,20 @@ export function netPositions(lots: readonly Position[]): Position[] {
     }
     // A stale mark is the worse of the two, so the newer date wins outright.
     const newer = lot.asOf > existing.asOf ? lot : existing;
+    // Summing basis across a long and a short leg produces a figure that
+    // describes nothing — the legs were opened for opposite reasons and a
+    // combined "cost" of the net position is not a quantity that exists. Say
+    // undefined rather than a number nobody could act on.
+    const opposed = existing.shares.isNegative() !== lot.shares.isNegative();
     byTicker.set(lot.ticker, {
       asOf: newer.asOf,
-      costBasis: add(existing.costBasis, lot.costBasis),
+      costBasis: opposed ? undefined : add(existing.costBasis, lot.costBasis),
       price: newer.price,
       shares: existing.shares.plus(lot.shares),
       ticker: existing.ticker,
-      unrealisedGain: add(existing.unrealisedGain, lot.unrealisedGain)
+      unrealisedGain: opposed
+        ? undefined
+        : add(existing.unrealisedGain, lot.unrealisedGain)
     });
   }
 

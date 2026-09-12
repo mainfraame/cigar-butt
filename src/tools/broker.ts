@@ -10,6 +10,7 @@ import { sortBy } from 'lodash-es';
 import * as z from 'zod/v4';
 
 import { brokerAdapter, configuredBrokers } from '../broker/registry.ts';
+import { describeTaxTreatment } from '../broker/tax.ts';
 import {
   completeAuthorization,
   configuredEnvironments,
@@ -28,6 +29,7 @@ import {
   cell,
   DISCLAIMER,
   pct,
+  TAX_NOTE,
   text,
   usd,
   type ToolResult
@@ -178,14 +180,24 @@ export function registerBrokerTools(server: McpServer): void {
           .map(
             account =>
               `| \`${account.id}\` | ${account.number} | ${account.type} | ` +
-              `${account.description} | ${account.status} |`
+              `${account.description} | ${account.status} | ${account.taxTreatment} |`
           )
           .join('\n');
 
         return text(
           `## Accounts (${brokerAdapter().label()})\n\n` +
-            '| Account ID key | Account | Type | Description | Status |\n|---|---|---|---|---|\n' +
-            `${rows}\n\nPass the account ID key — the first column — to \`etrade_positions\`.`
+            '| Account ID key | Account | Type | Description | Status | Tax |\n' +
+            '|---|---|---|---|---|---|\n' +
+            `${rows}\n\n` +
+            accounts
+              .map(
+                account =>
+                  `- **${account.number}** — ${describeTaxTreatment(account.taxTreatment)}`
+              )
+              .join('\n') +
+            '\n\nPass the account ID key — the first column — to ' +
+            '`etrade_positions`.' +
+            TAX_NOTE
         );
       })
   );
@@ -215,19 +227,28 @@ export function registerBrokerTools(server: McpServer): void {
         // eventually forget. What stays here is the long-only filter, which is
         // this server's policy rather than any broker's shape.
         const adapter = brokerAdapter();
-        const [positions, balance] = await Promise.all([
+        const [positions, balance, accounts] = await Promise.all([
           adapter.positions(accountIdKey),
           // Balances come from a different endpoint than positions, and the two
           // can disagree when a trade has settled but not yet cleared — showing
           // both is more honest than picking one.
-          adapter.balances(accountIdKey)
+          adapter.balances(accountIdKey),
+          // Needed for the tax treatment, which belongs with the handoff: a
+          // caller who has to look it up separately will forget, and the
+          // default must never silently become "taxable".
+          adapter.accounts()
         ]);
+
+        const treatment =
+          accounts.find(account => account.id === accountIdKey)?.taxTreatment ??
+          'unknown';
 
         const holdings = sortBy(
           positions.filter(position => gtZero(position.shares)),
           position => position.ticker
         ).map(position => ({
           asOf: position.asOf,
+          costBasis: money(position.costBasis),
           price: money(position.price) ?? 0,
           shares: out(position.shares, 6) ?? 0,
           ticker: position.ticker
@@ -262,8 +283,8 @@ export function registerBrokerTools(server: McpServer): void {
             `Total account value ${cell(money(balance.totalValue) === undefined ? undefined : usd(money(balance.totalValue)))} ` +
             `as of ${balance.asOf}.\n\n` +
             '### For `plan_rebalance`\n\n' +
-            `Pass this as \`holdings\`, and ${money(balance.cashAvailable) ?? 0} as ` +
-            '`availableCash`:\n\n' +
+            `Pass this as \`holdings\`, ${money(balance.cashAvailable) ?? 0} as ` +
+            `\`availableCash\`, and \`taxTreatment: "${treatment}"\`:\n\n` +
             `\`\`\`json\n${JSON.stringify(holdings, undefined, 2)}\n\`\`\`\n\n` +
             (excluded.length > 0
               ? `**Excluded from that block:** ${excluded.join(', ')}. Multiple ` +
@@ -301,7 +322,9 @@ export function registerBrokerTools(server: McpServer): void {
             'Every price above is a last-trade mark carrying its own date. A mark from ' +
             'a thin name may be days old even while the market is open, and sizing ' +
             'against a stale mark is the mistake this server exists to prevent — check ' +
-            'the dates before acting on a plan built from them.' +
+            'the dates before acting on a plan built from them.\n\n' +
+            `Tax treatment: ${describeTaxTreatment(treatment)}.` +
+            TAX_NOTE +
             DISCLAIMER
         );
       })
