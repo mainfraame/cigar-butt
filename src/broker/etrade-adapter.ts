@@ -175,9 +175,17 @@ export const etradeAdapter: BrokerAdapter = {
       const clientOrderId = `cb${Date.now().toString(36)}`.slice(0, 20);
       const result = await previewOrder(toEtradeOrder(request, clientOrderId));
 
+      // E*TRADE returns a commission but not always a total. A limit order's
+      // worst case is arithmetic — the limit times the quantity, plus the
+      // commission it did give us — and printing "—" for the one figure a
+      // person needs before placing is worse than computing it.
+      const worstCase = request.limitPrice
+        .times(request.quantity)
+        .plus(result.estimatedCommission ?? ZERO);
+
       return {
         estimatedCommission: result.estimatedCommission,
-        estimatedTotal: result.estimatedTotal,
+        estimatedTotal: result.estimatedTotal ?? worstCase,
         ref: `${clientOrderId}:${result.previewId}`,
         request,
         warnings: [
