@@ -30,13 +30,23 @@ const KEYS = [
   'CIGAR_BUTT_MAX_ORDER_VALUE'
 ];
 
+let sandbox: string;
+
 beforeEach(() => {
   for (const key of KEYS) delete process.env[key];
+  // Point at an empty credential file. Without this the gate reads the
+  // developer's own store — and once someone enables trading there, "is off
+  // in a fresh install" passes or fails depending on whose machine runs it.
+  sandbox = mkdtempSync(join(tmpdir(), 'cb-gate-'));
+  writeFileSync(join(sandbox, 'credentials.json'), '{}');
+  process.env['CIGAR_BUTT_CONFIG'] = join(sandbox, 'credentials.json');
   resetCredentialCache();
 });
 
 afterEach(() => {
   for (const key of KEYS) delete process.env[key];
+  delete process.env['CIGAR_BUTT_CONFIG'];
+  rmSync(sandbox, { force: true, recursive: true });
   resetCredentialCache();
 });
 
@@ -51,6 +61,8 @@ describe('trading gate', () => {
     // Two separate decisions on purpose.
     process.env['CIGAR_BUTT_ENABLE_ORDERS'] = '1';
 
+    resetCredentialCache();
+
     expect(refuseOrder(order(), 'test')).toBeUndefined();
     expect(refuseOrder(order(), 'live')).toContain('simulated books only');
     expect(liveOrdersEnabled()).toBe(false);
@@ -60,11 +72,15 @@ describe('trading gate', () => {
     process.env['CIGAR_BUTT_ENABLE_ORDERS'] = '1';
     process.env['CIGAR_BUTT_ENABLE_LIVE_ORDERS'] = '1';
 
+    resetCredentialCache();
+
     expect(refuseOrder(order(), 'live')).toBeUndefined();
   });
 
   it('caps the notional of a single order', () => {
     process.env['CIGAR_BUTT_ENABLE_ORDERS'] = '1';
+
+    resetCredentialCache();
 
     // 1,000 x $2.58 = $2,580, over the $2,500 default.
     const refusal = refuseOrder(order({ quantity: dec(1000)! }), 'test');
@@ -76,6 +92,8 @@ describe('trading gate', () => {
     process.env['CIGAR_BUTT_ENABLE_ORDERS'] = '1';
     process.env['CIGAR_BUTT_MAX_ORDER_VALUE'] = '10000';
 
+    resetCredentialCache();
+
     expect(
       refuseOrder(order({ quantity: dec(1000)! }), 'test')
     ).toBeUndefined();
@@ -85,11 +103,15 @@ describe('trading gate', () => {
   it('falls back to the default ceiling on nonsense', () => {
     process.env['CIGAR_BUTT_MAX_ORDER_VALUE'] = 'lots';
 
+    resetCredentialCache();
+
     expect(maxOrderValue().toString()).toBe('2500');
   });
 
   it('refuses a fractional or zero quantity', () => {
     process.env['CIGAR_BUTT_ENABLE_ORDERS'] = '1';
+
+    resetCredentialCache();
 
     expect(refuseOrder(order({ quantity: dec('1.5')! }), 'test')).toContain(
       'whole number'
@@ -104,6 +126,8 @@ describe('trading gate', () => {
     // someone else's exit.
     process.env['CIGAR_BUTT_ENABLE_ORDERS'] = '1';
 
+    resetCredentialCache();
+
     expect(refuseOrder(order({ limitPrice: dec(0)! }), 'test')).toContain(
       'does not send market orders'
     );
@@ -114,23 +138,16 @@ describe('switches resolve from the credential file', () => {
   it('honours a switch set in credentials.json, not just the environment', () => {
     // Reading process.env alone meant a switch set in the file looked
     // enabled and silently was not — the worst shape for a safety control.
-    const dir = mkdtempSync(join(tmpdir(), 'cb-gate-'));
-    const path = join(dir, 'credentials.json');
     writeFileSync(
-      path,
+      join(sandbox, 'credentials.json'),
       JSON.stringify({
         CIGAR_BUTT_ENABLE_LIVE_ORDERS: '1',
         CIGAR_BUTT_ENABLE_ORDERS: '1'
       })
     );
-    process.env['CIGAR_BUTT_CONFIG'] = path;
     resetCredentialCache();
 
     expect(ordersEnabled()).toBe(true);
     expect(liveOrdersEnabled()).toBe(true);
-
-    delete process.env['CIGAR_BUTT_CONFIG'];
-    rmSync(dir, { force: true, recursive: true });
-    resetCredentialCache();
   });
 });

@@ -1,25 +1,46 @@
 import {
   accountBalance,
+  cancelOrder,
   completeAuthorization,
   configuredEnvironments,
   environment,
   hasAccessToken,
   hasConsumerCredentials,
   listAccounts,
+  listOrders,
   listTransactions,
+  placeOrder,
   portfolioPositions,
+  previewOrder,
   renewIfStale,
   revokeAccessToken,
   setEnvironment,
-  startAuthorization
+  startAuthorization,
+  type EtradeOrderRequest
 } from '../data/etrade.ts';
 import { dec, ZERO } from '../math/decimal.ts';
 import {
   netPositions,
   type BrokerAdapter,
-  type BrokerEnvironment
+  type BrokerEnvironment,
+  type OrderRequest
 } from './contract.ts';
 import { etradeTaxTreatment } from './tax.ts';
+
+/** The ref carries both halves; `place` needs the preview id specifically. */
+const previewIdOf = (ref: string): string => ref.split(':').at(-1) ?? ref;
+
+const toEtradeOrder = (
+  request: OrderRequest,
+  clientOrderId: string
+): EtradeOrderRequest => ({
+  accountIdKey: request.accountId,
+  clientOrderId: clientOrderId.split(':')[0] ?? clientOrderId,
+  limitPrice: request.limitPrice.toString(),
+  quantity: request.quantity.toString(),
+  side: request.side,
+  symbol: request.symbol
+});
 
 /** E*TRADE says sandbox and production; the contract says test and live. */
 const toEtrade = (env: BrokerEnvironment): 'production' | 'sandbox' =>
@@ -116,6 +137,58 @@ export const etradeAdapter: BrokerAdapter = {
   },
 
   setEnvironment: env => setEnvironment(toEtrade(env)),
+
+  trading: {
+    cancel: cancelOrder,
+
+    open: async accountId =>
+      (await listOrders(accountId)).map(order => ({
+        filledQuantity: order.filledQuantity,
+        orderId: order.orderId,
+        placedAt: order.placedAt,
+        status: order.status,
+        symbol: order.symbol
+      })),
+
+    /**
+     * Quotes the preview id back to E*TRADE, which is what its API requires —
+     * the broker will not place an order that was not previewed. The neutral
+     * contract's preview-then-place shape was taken from here.
+     */
+    place: async preview => {
+      const placed = await placeOrder(
+        toEtradeOrder(preview.request, preview.ref),
+        previewIdOf(preview.ref)
+      );
+      return {
+        filledQuantity: undefined,
+        orderId: placed.orderId,
+        placedAt: new Date().toISOString().slice(0, 10),
+        status: placed.status,
+        symbol: preview.request.symbol
+      };
+    },
+
+    preview: async request => {
+      // E*TRADE caps clientOrderId at 20 alphanumeric characters, and the ref
+      // has to carry the preview id so `place` can quote it back.
+      const clientOrderId = `cb${Date.now().toString(36)}`.slice(0, 20);
+      const result = await previewOrder(toEtradeOrder(request, clientOrderId));
+
+      return {
+        estimatedCommission: result.estimatedCommission,
+        estimatedTotal: result.estimatedTotal,
+        ref: `${clientOrderId}:${result.previewId}`,
+        request,
+        warnings: [
+          ...result.warnings,
+          environment() === 'sandbox'
+            ? 'Sandbox account: this order is simulated and moves no money.'
+            : 'Production account: this order commits real money.'
+        ]
+      };
+    }
+  },
 
   transactions: async (accountId, options) => {
     const result = await listTransactions(accountId, options);

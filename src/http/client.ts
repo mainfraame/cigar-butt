@@ -11,7 +11,7 @@ export interface FetchJsonOptions {
   /** Form-encoded body. Mutually exclusive with `body`; implies POST. */
   readonly form?: Readonly<Record<string, string>>;
   readonly headers?: Readonly<Record<string, string>>;
-  readonly method?: 'DELETE' | 'GET' | 'POST';
+  readonly method?: 'DELETE' | 'GET' | 'POST' | 'PUT';
   /** `text` returns the raw body; the default parses JSON. */
   readonly parse?: 'json' | 'text';
   /** Requests per second permitted against this host. */

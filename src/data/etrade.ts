@@ -967,3 +967,258 @@ export async function portfolioPositions(
     totalValue: balance.totalValue
   };
 }
+
+/* ------------------------------------------------------------------ orders */
+
+/**
+ * Order placement.
+ *
+ * Deliberately not routed through `get`, which caches: an order operation
+ * served from cache would be either a phantom fill or a silently repeated
+ * trade, and both are worse than an error.
+ *
+ * E*TRADE's own API is preview-then-place — the preview returns an id that
+ * `place` must quote back — which is where the neutral contract's shape came
+ * from. The two-step is not this server being cautious on top of the broker;
+ * it is the broker's design, generalised to every broker.
+ */
+
+export interface EtradeOrderRequest {
+  readonly accountIdKey: string;
+  readonly clientOrderId: string;
+  readonly limitPrice: string;
+  readonly quantity: string;
+  readonly side: 'buy' | 'sell';
+  readonly symbol: string;
+}
+
+interface RawEtradeMessage {
+  code?: number;
+  description?: string;
+}
+
+interface RawEtradeOrderDetail {
+  estimatedCommission?: Num;
+  estimatedTotalAmount?: Num;
+  messages?: { Message?: RawEtradeMessage | RawEtradeMessage[] };
+  Messages?: { Message?: RawEtradeMessage | RawEtradeMessage[] };
+  orderId?: Num;
+  orderValue?: Num;
+  status?: string;
+}
+
+interface PreviewResponse {
+  PreviewOrderResponse?: {
+    Order?: RawEtradeOrderDetail | RawEtradeOrderDetail[];
+    PreviewIds?: { previewId?: Num } | { previewId?: Num }[];
+  };
+}
+
+interface PlaceResponse {
+  PlaceOrderResponse?: {
+    Order?: RawEtradeOrderDetail | RawEtradeOrderDetail[];
+    OrderIds?: { orderId?: Num } | { orderId?: Num }[];
+  };
+}
+
+/** The order payload, identical between preview and place by E*TRADE's design. */
+function orderPayload(request: EtradeOrderRequest): unknown {
+  return [
+    {
+      allOrNone: 'false',
+      Instrument: [
+        {
+          orderAction: request.side === 'buy' ? 'BUY' : 'SELL',
+          Product: { securityType: 'EQ', symbol: request.symbol },
+          quantity: request.quantity,
+          quantityType: 'QUANTITY'
+        }
+      ],
+      limitPrice: request.limitPrice,
+      // Day only and regular session only. An order resting overnight or in
+      // an extended session is one nobody is watching.
+      marketSession: 'REGULAR',
+      orderTerm: 'GOOD_FOR_DAY',
+      priceType: 'LIMIT'
+    }
+  ];
+}
+
+/** Signs and sends without caching. Orders are never replayed from a cache. */
+async function orderRequest<T>(
+  method: 'GET' | 'POST' | 'PUT',
+  path: string,
+  body?: unknown
+): Promise<T> {
+  const url = `${apiBase()}${path}`;
+  const identity = accessIdentity();
+  startKeepAlive();
+
+  const payload = await fetchJson<T>(url, {
+    body,
+    headers: {
+      accept: 'application/json',
+      authorization: authorization(method, url, {}, identity)
+    },
+    method,
+    rateKey: RATE_KEY,
+    requestsPerSecond: REQUESTS_PER_SECOND
+  });
+  touch();
+  return payload;
+}
+
+const firstOf = <T>(value: T | T[] | undefined): T | undefined =>
+  Array.isArray(value) ? value[0] : value;
+
+function messagesOf(detail: RawEtradeOrderDetail | undefined): string[] {
+  const raw = detail?.Messages?.Message ?? detail?.messages?.Message;
+  const entries = raw === undefined ? [] : Array.isArray(raw) ? raw : [raw];
+  return entries
+    .map(message => message.description?.trim())
+    .filter((text): text is string => text !== undefined && text.length > 0);
+}
+
+export interface EtradePreview {
+  readonly estimatedCommission: Decimal | undefined;
+  readonly estimatedTotal: Decimal | undefined;
+  readonly previewId: string;
+  readonly warnings: string[];
+}
+
+export async function previewOrder(
+  request: EtradeOrderRequest
+): Promise<EtradePreview> {
+  const response = await orderRequest<PreviewResponse>(
+    'POST',
+    `/v1/accounts/${request.accountIdKey}/orders/preview.json`,
+    {
+      PreviewOrderRequest: {
+        clientOrderId: request.clientOrderId,
+        Order: orderPayload(request),
+        orderType: 'EQ'
+      }
+    }
+  );
+
+  const detail = firstOf(response.PreviewOrderResponse?.Order);
+  const previewId = firstOf(
+    response.PreviewOrderResponse?.PreviewIds
+  )?.previewId;
+  if (previewId === undefined) {
+    throw new Error(
+      'E*TRADE previewed the order without returning a preview id, so it ' +
+        'cannot be placed. Nothing was sent.'
+    );
+  }
+
+  return {
+    estimatedCommission: dec(detail?.estimatedCommission),
+    estimatedTotal: dec(detail?.estimatedTotalAmount ?? detail?.orderValue),
+    previewId: String(previewId),
+    warnings: messagesOf(detail)
+  };
+}
+
+export async function placeOrder(
+  request: EtradeOrderRequest,
+  previewId: string
+): Promise<{ orderId: string; status: string }> {
+  const response = await orderRequest<PlaceResponse>(
+    'POST',
+    `/v1/accounts/${request.accountIdKey}/orders/place.json`,
+    {
+      PlaceOrderRequest: {
+        clientOrderId: request.clientOrderId,
+        Order: orderPayload(request),
+        orderType: 'EQ',
+        PreviewIds: [{ previewId }]
+      }
+    }
+  );
+
+  const detail = firstOf(response.PlaceOrderResponse?.Order);
+  const orderId =
+    firstOf(response.PlaceOrderResponse?.OrderIds)?.orderId ?? detail?.orderId;
+
+  if (orderId === undefined) {
+    throw new Error(
+      'E*TRADE accepted the request without returning an order id. Check ' +
+        '`order_list` before retrying — a retry could duplicate a live order.'
+    );
+  }
+
+  return { orderId: String(orderId), status: detail?.status ?? 'OPEN' };
+}
+
+interface OrdersResponse {
+  OrdersResponse?: {
+    Order?: RawEtradeOrder | RawEtradeOrder[];
+  };
+}
+
+interface RawEtradeOrder {
+  OrderDetail?:
+    | {
+        Instrument?:
+          | { filledQuantity?: Num; Product?: { symbol?: string } }
+          | { filledQuantity?: Num; Product?: { symbol?: string } }[];
+        placedTime?: Num;
+        status?: string;
+      }
+    | {
+        Instrument?:
+          | { filledQuantity?: Num; Product?: { symbol?: string } }
+          | { filledQuantity?: Num; Product?: { symbol?: string } }[];
+        placedTime?: Num;
+        status?: string;
+      }[];
+  orderId?: Num;
+}
+
+export interface EtradeOpenOrder {
+  readonly filledQuantity: Decimal | undefined;
+  readonly orderId: string;
+  readonly placedAt: string;
+  readonly status: string;
+  readonly symbol: string;
+}
+
+export async function listOrders(
+  accountIdKey: string
+): Promise<EtradeOpenOrder[]> {
+  const response = await orderRequest<OrdersResponse>(
+    'GET',
+    `/v1/accounts/${accountIdKey}/orders.json?status=OPEN`
+  );
+
+  const raw = response.OrdersResponse?.Order;
+  const orders = raw === undefined ? [] : Array.isArray(raw) ? raw : [raw];
+
+  return orders.map(order => {
+    const detail = firstOf(order.OrderDetail);
+    const instrument = firstOf(detail?.Instrument);
+    const placed = Number(detail?.placedTime);
+    return {
+      filledQuantity: dec(instrument?.filledQuantity),
+      orderId: String(order.orderId ?? ''),
+      // E*TRADE reports epoch milliseconds.
+      placedAt: Number.isFinite(placed)
+        ? new Date(placed).toISOString().slice(0, 10)
+        : '',
+      status: detail?.status ?? 'unknown',
+      symbol: instrument?.Product?.symbol ?? ''
+    };
+  });
+}
+
+export async function cancelOrder(
+  accountIdKey: string,
+  orderId: string
+): Promise<void> {
+  await orderRequest<unknown>(
+    'PUT',
+    `/v1/accounts/${accountIdKey}/orders/cancel.json`,
+    { CancelOrderRequest: { orderId: Number(orderId) } }
+  );
+}
