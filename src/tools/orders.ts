@@ -31,8 +31,19 @@ import type { OrderPreview, OrderRequest } from '../broker/contract.ts';
  * closest thing to a human signature available here.
  */
 
-/** Previews issued this session, by ref. Never written to disk. */
-const previews = new Map<string, OrderPreview>();
+/**
+ * Previews issued this session, by ref. Never written to disk.
+ *
+ * The account *ref* is kept beside the preview, not just the broker's own
+ * account id. `place` has to re-scope the book to re-check the gate, and
+ * scoping on a bare id loses the broker prefix — which meant a paper order
+ * priced happily and then refused to place, because environment arbitration
+ * discarded the broker it belonged to.
+ */
+const previews = new Map<
+  string,
+  { accountRef: string; preview: OrderPreview }
+>();
 
 function renderPreview(preview: OrderPreview, environment: string): string {
   const { limitPrice, quantity, side, symbol } = preview.request;
@@ -130,7 +141,7 @@ export function registerOrderTools(server: McpServer): void {
         if (refusal) return text(refusal);
 
         const preview = await adapter.trading.preview(request);
-        previews.set(preview.ref, preview);
+        previews.set(preview.ref, { accountRef: target.ref, preview });
 
         return text(
           renderPreview(preview, adapter.environmentLabel(target.environment)) +
@@ -166,8 +177,8 @@ export function registerOrderTools(server: McpServer): void {
     },
     ({ ref }) =>
       attempt(async () => {
-        const preview = previews.get(ref);
-        if (!preview) {
+        const held = previews.get(ref);
+        if (!held) {
           return text(
             `No preview with ref \`${ref}\` in this conversation. Previews are ` +
               'held in memory and expire with the session, which is ' +
@@ -176,12 +187,13 @@ export function registerOrderTools(server: McpServer): void {
           );
         }
 
-        const scope = await openBook({ account: preview.request.accountId });
+        const { accountRef, preview } = held;
+        const scope = await openBook({ account: accountRef });
         const target = scope.accounts[0];
         if (!target) {
           return text(
-            'The account this preview was priced against is no longer visible. ' +
-              'Nothing was sent.'
+            `The account this preview was priced against (\`${accountRef}\`) is ` +
+              'no longer visible. Nothing was sent.'
           );
         }
 
