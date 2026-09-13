@@ -154,8 +154,30 @@ export interface OrderRequest {
   readonly quantity: Decimal;
   readonly side: OrderSide;
   readonly symbol: string;
-  /** Day only. A resting order nobody is watching is its own hazard. */
-  readonly timeInForce: 'day';
+  /**
+   * Attach a sell at this price to a buy, filled only if the buy fills.
+   *
+   * Supported where the broker has bracket orders. E*TRADE's `PlaceOrder`
+   * does not — its `orderType` list has no bracket, OCO or contingent form —
+   * so there the exit is a separate good-till-cancelled sell placed after the
+   * buy fills, which reaches the same place in two steps.
+   *
+   * Deliberately no stop-loss counterpart. A falling price makes a
+   * net-net *cheaper*, so a stop would sell the position at its most
+   * attractive and is the one automation this method actively argues against.
+   */
+  readonly takeProfit?: Decimal;
+  /**
+   * `day` for an entry, `gtc` for an exit.
+   *
+   * A day order is the right default for a buy — a resting bid nobody is
+   * watching is its own hazard. It is the wrong one for an exit: this method
+   * holds until the discount closes, which takes quarters or years, and a
+   * take-profit that expires at the bell is not an exit strategy. Brokers cap
+   * good-till-cancelled at 60 to 180 days, so it still needs re-placing; it
+   * is a standing instruction, not a permanent one.
+   */
+  readonly timeInForce: 'day' | 'gtc';
 }
 
 /**

@@ -990,6 +990,7 @@ export interface EtradeOrderRequest {
   readonly quantity: string;
   readonly side: 'buy' | 'sell';
   readonly symbol: string;
+  readonly timeInForce: 'day' | 'gtc';
 }
 
 interface RawEtradeMessage {
@@ -1035,10 +1036,12 @@ function orderPayload(request: EtradeOrderRequest): unknown {
         }
       ],
       limitPrice: request.limitPrice,
-      // Day only and regular session only. An order resting overnight or in
-      // an extended session is one nobody is watching.
+      // Regular session only. The term follows the request: a day order for
+      // an entry, good-till-cancelled for an exit that waits on a discount
+      // closing.
       marketSession: 'REGULAR',
-      orderTerm: 'GOOD_FOR_DAY',
+      orderTerm:
+        request.timeInForce === 'gtc' ? 'GOOD_UNTIL_CANCEL' : 'GOOD_FOR_DAY',
       priceType: 'LIMIT'
     }
   ];

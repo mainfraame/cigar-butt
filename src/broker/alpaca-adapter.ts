@@ -432,15 +432,25 @@ export const alpacaAdapter: BrokerAdapter = {
      * makes the broker's own record point back at the preview a human saw.
      */
     place: async preview => {
-      const { limitPrice, quantity, side, symbol } = preview.request;
+      const { limitPrice, quantity, side, symbol, takeProfit, timeInForce } =
+        preview.request;
       return toPlaced(
         await send<RawOrder>('/v2/orders', 'POST', {
           client_order_id: preview.ref,
           limit_price: limitPrice.toString(),
+          // A bracket attaches the exit to the entry, so the sell exists only
+          // if the buy fills. No stop-loss leg: a falling price makes a
+          // net-net cheaper, and a stop would sell it at its most attractive.
+          ...(takeProfit
+            ? {
+                order_class: 'bracket',
+                take_profit: { limit_price: takeProfit.toString() }
+              }
+            : {}),
           qty: quantity.toString(),
           side,
           symbol,
-          time_in_force: 'day',
+          time_in_force: timeInForce,
           type: 'limit'
         })
       );

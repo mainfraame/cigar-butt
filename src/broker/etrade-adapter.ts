@@ -39,7 +39,8 @@ const toEtradeOrder = (
   limitPrice: request.limitPrice.toString(),
   quantity: request.quantity.toString(),
   side: request.side,
-  symbol: request.symbol
+  symbol: request.symbol,
+  timeInForce: request.timeInForce
 });
 
 /** E*TRADE says sandbox and production; the contract says test and live. */

@@ -151,3 +151,32 @@ describe('switches resolve from the credential file', () => {
     expect(liveOrdersEnabled()).toBe(true);
   });
 });
+
+describe('exit orders', () => {
+  it('accepts a good-till-cancelled sell', () => {
+    // The exit for this method waits quarters or years for a discount to
+    // close, so a day order is not an exit strategy.
+    process.env['CIGAR_BUTT_ENABLE_ORDERS'] = '1';
+    resetCredentialCache();
+
+    const exit = order({
+      limitPrice: dec('5.18')!,
+      side: 'sell',
+      timeInForce: 'gtc'
+    });
+
+    expect(refuseOrder(exit, 'test')).toBeUndefined();
+  });
+
+  it('still requires a limit on an exit', () => {
+    process.env['CIGAR_BUTT_ENABLE_ORDERS'] = '1';
+    resetCredentialCache();
+
+    expect(
+      refuseOrder(
+        order({ limitPrice: dec(0)!, side: 'sell', timeInForce: 'gtc' }),
+        'test'
+      )
+    ).toContain('does not send market orders');
+  });
+});

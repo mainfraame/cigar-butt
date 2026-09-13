@@ -53,8 +53,11 @@ function renderPreview(preview: OrderPreview, environment: string): string {
     `| Side | ${side} |\n` +
     `| Symbol | ${symbol} |\n` +
     `| Quantity | ${out(quantity, 0)} shares |\n` +
-    `| Order type | limit, day |\n` +
+    `| Order type | limit, ${preview.request.timeInForce === 'gtc' ? 'good till cancelled' : 'day'} |\n` +
     `| Limit price | ${usd(money(limitPrice))} |\n` +
+    (preview.request.takeProfit
+      ? `| Attached sell | ${usd(money(preview.request.takeProfit))} |\n`
+      : '') +
     `| Worst-case cost | ${cell(money(preview.estimatedTotal) === undefined ? undefined : usd(money(preview.estimatedTotal)))} |\n` +
     `| Commission | ${cell(money(preview.estimatedCommission) === undefined ? undefined : usd(money(preview.estimatedCommission)))} |\n` +
     `| Account | ${preview.request.accountId} (${environment}) |\n\n` +
@@ -101,11 +104,42 @@ export function registerOrderTools(server: McpServer): void {
           ),
         quantity: z.number().int().positive().describe('Whole shares.'),
         side: z.enum(['buy', 'sell']),
-        symbol: z.string().min(1).max(10)
+        symbol: z.string().min(1).max(10),
+        takeProfit: z
+          .number()
+          .positive()
+          .finite()
+          .optional()
+          .describe(
+            'Attach a sell at this price to a buy, so the exit exists only if ' +
+              'the entry fills. Alpaca supports this; E*TRADE has no bracket ' +
+              'order type at all, so there the exit is a separate `gtc` sell ' +
+              'placed once the buy fills. There is deliberately no stop-loss ' +
+              'counterpart: a falling price makes a net-net cheaper, and a ' +
+              'stop would sell it at its most attractive.'
+          ),
+        timeInForce: z
+          .enum(['day', 'gtc'])
+          .default('day')
+          .describe(
+            '`day` for an entry. `gtc` for an exit — this method waits ' +
+              'quarters or years for a discount to close, and a take-profit ' +
+              'that expires at the bell is not an exit. Brokers cap ' +
+              'good-till-cancelled at 60 to 180 days, so it still needs ' +
+              're-placing.'
+          )
       }),
       title: 'Price an order without sending it'
     },
-    ({ account, limitPrice, quantity, side, symbol }) =>
+    ({
+      account,
+      limitPrice,
+      quantity,
+      side,
+      symbol,
+      takeProfit,
+      timeInForce
+    }) =>
       attempt(async () => {
         if (!ordersEnabled()) {
           return text(refuseOrder({} as OrderRequest, 'test') ?? '');
@@ -134,7 +168,8 @@ export function registerOrderTools(server: McpServer): void {
           quantity: dec(quantity)!,
           side,
           symbol: symbol.trim().toUpperCase(),
-          timeInForce: 'day'
+          takeProfit: dec(takeProfit),
+          timeInForce
         };
 
         const refusal = refuseOrder(request, target.environment);
