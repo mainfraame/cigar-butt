@@ -1,3 +1,4 @@
+import { getCredential } from '../config/store.ts';
 import { dec, Decimal, gtZero } from '../math/decimal.ts';
 
 import type { BrokerEnvironment, OrderRequest } from './contract.ts';
@@ -27,22 +28,32 @@ const MAX_VALUE = 'CIGAR_BUTT_MAX_ORDER_VALUE';
 /** Deliberately small. Raise it consciously or not at all. */
 const DEFAULT_MAX_ORDER_VALUE = '2500';
 
-const truthy = (value: string | undefined): boolean =>
-  value === '1' || value?.toLowerCase() === 'true';
+/**
+ * Resolved the same way as every other setting here: environment first, then
+ * the 0600 credential file.
+ *
+ * Reading `process.env` alone meant a switch set in `credentials.json` looked
+ * enabled and silently was not — the worst shape for a safety control, since
+ * the user believes a guard is off when it is on, or on when it is off.
+ */
+const switchOn = (name: string): boolean => {
+  const value = getCredential(name)?.trim().toLowerCase();
+  return value === '1' || value === 'true';
+};
 
 export function ordersEnabled(): boolean {
-  return truthy(process.env[ENABLE]);
+  return switchOn(ENABLE);
 }
 
 export function liveOrdersEnabled(): boolean {
-  return ordersEnabled() && truthy(process.env[ENABLE_LIVE]);
+  return ordersEnabled() && switchOn(ENABLE_LIVE);
 }
 
 export function maxOrderValue(): Decimal {
-  // `dec` rather than the Decimal constructor: a malformed environment
-  // variable must fall back to the safe default, not throw on the way to
-  // deciding whether an order is safe.
-  const parsed = dec(process.env[MAX_VALUE]?.trim());
+  // `dec` rather than the Decimal constructor: a malformed setting must fall
+  // back to the safe default, not throw on the way to deciding whether an
+  // order is safe.
+  const parsed = dec(getCredential(MAX_VALUE)?.trim());
   return gtZero(parsed) ? parsed : new Decimal(DEFAULT_MAX_ORDER_VALUE);
 }
 

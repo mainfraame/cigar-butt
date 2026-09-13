@@ -1,5 +1,9 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { resetCredentialCache } from '../config/store.ts';
 import { dec } from '../math/decimal.ts';
 import {
   liveOrdersEnabled,
@@ -28,10 +32,12 @@ const KEYS = [
 
 beforeEach(() => {
   for (const key of KEYS) delete process.env[key];
+  resetCredentialCache();
 });
 
 afterEach(() => {
   for (const key of KEYS) delete process.env[key];
+  resetCredentialCache();
 });
 
 describe('trading gate', () => {
@@ -101,5 +107,30 @@ describe('trading gate', () => {
     expect(refuseOrder(order({ limitPrice: dec(0)! }), 'test')).toContain(
       'does not send market orders'
     );
+  });
+});
+
+describe('switches resolve from the credential file', () => {
+  it('honours a switch set in credentials.json, not just the environment', () => {
+    // Reading process.env alone meant a switch set in the file looked
+    // enabled and silently was not — the worst shape for a safety control.
+    const dir = mkdtempSync(join(tmpdir(), 'cb-gate-'));
+    const path = join(dir, 'credentials.json');
+    writeFileSync(
+      path,
+      JSON.stringify({
+        CIGAR_BUTT_ENABLE_LIVE_ORDERS: '1',
+        CIGAR_BUTT_ENABLE_ORDERS: '1'
+      })
+    );
+    process.env['CIGAR_BUTT_CONFIG'] = path;
+    resetCredentialCache();
+
+    expect(ordersEnabled()).toBe(true);
+    expect(liveOrdersEnabled()).toBe(true);
+
+    delete process.env['CIGAR_BUTT_CONFIG'];
+    rmSync(dir, { force: true, recursive: true });
+    resetCredentialCache();
   });
 });
