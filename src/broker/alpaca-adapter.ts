@@ -173,15 +173,26 @@ function host(env: BrokerEnvironment = environment()): string {
 interface RawOrder {
   filled_qty?: string;
   id?: string;
+  legs?: RawOrder[];
+  limit_price?: string;
+  side?: string;
   status?: string;
   submitted_at?: string;
   symbol?: string;
 }
 
 const toPlaced = (raw: RawOrder): PlacedOrder => ({
+  // `legs` carries the attached exit on a one-triggers-other order. Alpaca
+  // holds it until the entry fills, so it is absent from a flat order list
+  // and invisible unless read from the parent.
+  ...(raw.legs && raw.legs.length > 0
+    ? { attached: raw.legs.map(leg => toPlaced(leg)) }
+    : {}),
   filledQuantity: dec(raw.filled_qty),
+  limitPrice: dec(raw.limit_price),
   orderId: raw.id ?? '',
   placedAt: raw.submitted_at ?? '',
+  side: raw.side === 'sell' ? 'sell' : 'buy',
   status: raw.status ?? 'unknown',
   symbol: raw.symbol ?? ''
 });
@@ -424,7 +435,13 @@ export const alpacaAdapter: BrokerAdapter = {
     },
 
     open: async () =>
-      (await get<RawOrder[]>('/v2/orders', { status: 'open' })).map(toPlaced),
+      (
+        await get<RawOrder[]>('/v2/orders', {
+          // Without this Alpaca omits the attached legs entirely.
+          nested: 'true',
+          status: 'open'
+        })
+      ).map(toPlaced),
 
     /**
      * Takes the preview rather than an order, so nothing can be sent that was

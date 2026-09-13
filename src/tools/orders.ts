@@ -8,7 +8,11 @@ import { ordersEnabled, refuseOrder } from '../broker/trading-gate.ts';
 import { dec, money, out } from '../math/decimal.ts';
 import { attempt, cell, DISCLAIMER, text, usd } from './shared.ts';
 
-import type { OrderPreview, OrderRequest } from '../broker/contract.ts';
+import type {
+  OrderPreview,
+  OrderRequest,
+  PlacedOrder
+} from '../broker/contract.ts';
 
 /**
  * Placing orders.
@@ -68,6 +72,31 @@ function renderPreview(preview: OrderPreview, environment: string): string {
     `\`order_place\` with \`ref: "${preview.ref}"\`. The ref is the only way ` +
     'to place it, and it expires with this conversation.\n'
   );
+}
+
+/**
+ * One row for an order, plus one for each exit attached to it.
+ *
+ * An attached exit is a child the broker holds until the entry fills, so it
+ * is indented rather than listed flat — it reads as conditional on the order
+ * above it, which is what it is.
+ */
+function orderRows(order: PlacedOrder): string[] {
+  const rows = [
+    `| \`${order.orderId}\` | ${order.symbol} | ${order.status} | ` +
+      `${cell(out(order.filledQuantity, 0))} | ${order.placedAt} |`
+  ];
+
+  for (const leg of order.attached ?? []) {
+    rows.push(
+      `| ↳ \`${leg.orderId}\` | ${leg.symbol} ${leg.side ?? ''} ` +
+        `${cell(money(leg.limitPrice) === undefined ? undefined : usd(money(leg.limitPrice)))} | ` +
+        `${leg.status} (held until the entry fills) | ` +
+        `${cell(out(leg.filledQuantity, 0))} | ${leg.placedAt} |`
+    );
+  }
+
+  return rows;
 }
 
 export function registerOrderTools(server: McpServer): void {
@@ -300,13 +329,7 @@ export function registerOrderTools(server: McpServer): void {
         return text(
           `## Open orders — ${adapter.label()}\n\n` +
             '| Order id | Symbol | Status | Filled | Placed |\n|---|---|---|---|---|\n' +
-            orders
-              .map(
-                order =>
-                  `| \`${order.orderId}\` | ${order.symbol} | ${order.status} | ` +
-                  `${cell(out(order.filledQuantity, 0))} | ${order.placedAt} |`
-              )
-              .join('\n') +
+            orders.flatMap(order => orderRows(order)).join('\n') +
             DISCLAIMER
         );
       })

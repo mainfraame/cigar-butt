@@ -199,9 +199,20 @@ export interface OrderPreview {
 }
 
 export interface PlacedOrder {
+  /**
+   * Exits attached to this order, waiting on it to fill.
+   *
+   * An attached sell is a child order the broker holds back until the entry
+   * fills, so it does not appear in a flat list of open orders. Leaving it
+   * out means a user who attached an exit cannot confirm the exit exists —
+   * which is the one thing they would want to check.
+   */
+  readonly attached?: readonly PlacedOrder[];
   readonly filledQuantity: Decimal | undefined;
+  readonly limitPrice?: Decimal;
   readonly orderId: string;
   readonly placedAt: string;
+  readonly side?: OrderSide;
   readonly status: string;
   readonly symbol: string;
 }
