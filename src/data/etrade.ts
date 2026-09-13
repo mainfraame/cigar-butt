@@ -1044,11 +1044,20 @@ function orderPayload(request: EtradeOrderRequest): unknown {
   ];
 }
 
-/** Signs and sends without caching. Orders are never replayed from a cache. */
+/**
+ * Signs and sends without caching. Orders are never replayed from a cache.
+ *
+ * Query parameters are passed separately rather than glued onto the path,
+ * because OAuth 1.0a signs them: they form part of the base string, and a
+ * `?status=OPEN` present in the URL but absent from the signature produces
+ * `oauth_problem=signature_invalid`. The POSTs here carry no query and so
+ * happened to work while the one GET did not.
+ */
 async function orderRequest<T>(
   method: 'GET' | 'POST' | 'PUT',
   path: string,
-  body?: unknown
+  body?: unknown,
+  searchParams: Readonly<Record<string, string>> = {}
 ): Promise<T> {
   const url = `${apiBase()}${path}`;
   const identity = accessIdentity();
@@ -1058,11 +1067,12 @@ async function orderRequest<T>(
     body,
     headers: {
       accept: 'application/json',
-      authorization: authorization(method, url, {}, identity)
+      authorization: authorization(method, url, searchParams, identity)
     },
     method,
     rateKey: RATE_KEY,
-    requestsPerSecond: REQUESTS_PER_SECOND
+    requestsPerSecond: REQUESTS_PER_SECOND,
+    searchParams
   });
   touch();
   return payload;
@@ -1189,7 +1199,9 @@ export async function listOrders(
 ): Promise<EtradeOpenOrder[]> {
   const response = await orderRequest<OrdersResponse>(
     'GET',
-    `/v1/accounts/${accountIdKey}/orders.json?status=OPEN`
+    `/v1/accounts/${accountIdKey}/orders.json`,
+    undefined,
+    { status: 'OPEN' }
   );
 
   const raw = response.OrdersResponse?.Order;
