@@ -145,6 +145,19 @@ describe('openBook scoping', () => {
     expect(scope.excluded).toHaveLength(0);
   });
 
+  it('lets an account ref reach a simulated book past a live one', async () => {
+    // Naming an account is at least as explicit as naming a broker. Without
+    // this, asking for a paper account by ref while another broker was live
+    // returned "no account matches" — the environment arbitration having
+    // already discarded it before the filter ran.
+    only(fake('etrade'), fake('alpaca', { environment: 'test' }));
+
+    const scope = await openBook({ account: 'alpaca:alpaca-1' });
+
+    expect(scope.accounts.map(entry => entry.brokerId)).toEqual(['alpaca']);
+    expect(scope.environment).toBe('test');
+  });
+
   it('narrows to one account by ref', async () => {
     only(fake('etrade'), fake('alpaca'));
 

@@ -129,17 +129,28 @@ export async function openBook(
   options: { account?: string; broker?: string } = {}
 ): Promise<BookScope> {
   const connected = connectedBrokers();
-  const wanted = options.broker
-    ? connected.filter(broker => broker.id === options.broker)
+
+  // An account ref is `<broker>:<id>`, and naming one is at least as explicit
+  // a choice of book as naming the broker. Without this, asking for a paper
+  // account by ref while another broker is live returned "no account
+  // matches" — the environment arbitration having already discarded it.
+  const namedBroker =
+    options.broker ??
+    (options.account?.includes(':') === true
+      ? options.account.split(':')[0]
+      : undefined);
+
+  const wanted = namedBroker
+    ? connected.filter(broker => broker.id === namedBroker)
     : connected;
 
   if (wanted.length === 0) {
     return { accounts: [], environment: undefined, excluded: [], failures: [] };
   }
 
-  // An explicit broker is the user's choice of book, so no environment
-  // arbitration applies — there is only one environment in play.
-  const scoped = options.broker
+  // An explicit broker or account is the user's choice of book, so no
+  // environment arbitration applies — there is only one environment in play.
+  const scoped = namedBroker
     ? wanted[0]!.adapter.environment()
     : liveWins(wanted);
 
