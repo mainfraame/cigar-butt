@@ -74,10 +74,20 @@ brokerages this software can talk to; their names and marks belong to them.
 
 ## Brokerage access
 
-The brokerage integrations are **read-only by design**. This software does not
-place, modify or cancel orders, and does not move money. If you connect a
-brokerage account, you do so under that broker's terms and at your own risk,
-and you remain responsible for every order you place yourself.
+The brokerage integrations are **read-only unless you deliberately enable
+order placement**, which requires setting `CIGAR_BUTT_ENABLE_ORDERS`, and
+setting `CIGAR_BUTT_ENABLE_LIVE_ORDERS` as well before anything can touch real
+money. A default installation cannot place, modify or cancel an order.
+
+If you enable it, you are responsible for every order that results, including
+orders placed by an AI assistant operating this software on your behalf. The
+software requires an order to be previewed before it can be sent, caps the
+size of any single order, and refuses market orders — but these are
+safeguards, not guarantees, and they do not make an order yours any less. It
+does not move money between accounts.
+
+If you connect a brokerage account you do so under that broker's terms and at
+your own risk.
 
 ## Jurisdiction
 

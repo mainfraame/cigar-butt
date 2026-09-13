@@ -8,6 +8,7 @@ import { registerCongressTools } from './tools/congress.ts';
 import { registerFilingTools } from './tools/filings.ts';
 import { registerJapanTools } from './tools/japan.ts';
 import { registerMarketTools } from './tools/market.ts';
+import { registerOrderTools } from './tools/orders.ts';
 import { registerOwnershipTools } from './tools/ownership.ts';
 import { registerPortfolioTools } from './tools/portfolio.ts';
 import { registerResearchTools } from './tools/research.ts';
@@ -58,6 +59,13 @@ Order of operations, which matters more than any single tool:
    a JSON block shaped for \`plan_rebalance\`. \`broker_connect\` first if
    nothing is connected yet.
 9. \`plan_rebalance\` to turn targets plus current holdings into orders.
+10. \`order_preview\` then \`order_place\` only if the user has asked for a
+    trade in this conversation. Never place an order to be helpful, never to
+    complete a plan the user has not accepted, and never without showing the
+    preview first — \`order_place\` takes only a ref from a preview the user
+    has seen, and that is a property to preserve rather than work around.
+    Orders are limit-only and day-only. Placement is off unless the operator
+    enabled it, and off for real money unless they enabled that separately.
 
 Rules that hold regardless of what the user asks for:
 
@@ -131,6 +139,7 @@ export function createServer(): McpServer {
   registerFilingTools(server);
   registerPortfolioTools(server);
   registerOwnershipTools(server);
+  registerOrderTools(server);
   registerTechnicalTools(server);
   registerBrokerTools(server);
   registerCongressTools(server);

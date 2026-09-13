@@ -6,6 +6,7 @@ import {
   netPositions,
   type BrokerAdapter,
   type BrokerEnvironment,
+  type PlacedOrder,
   type Position
 } from './contract.ts';
 
@@ -167,6 +168,36 @@ function credentials(env: BrokerEnvironment = environment()): {
  */
 function host(env: BrokerEnvironment = environment()): string {
   return process.env.CIGAR_BUTT_ALPACA_HOST ?? HOSTS[env];
+}
+
+interface RawOrder {
+  filled_qty?: string;
+  id?: string;
+  status?: string;
+  submitted_at?: string;
+  symbol?: string;
+}
+
+const toPlaced = (raw: RawOrder): PlacedOrder => ({
+  filledQuantity: dec(raw.filled_qty),
+  orderId: raw.id ?? '',
+  placedAt: raw.submitted_at ?? '',
+  status: raw.status ?? 'unknown',
+  symbol: raw.symbol ?? ''
+});
+
+async function send<T>(
+  path: string,
+  method: 'DELETE' | 'GET' | 'POST',
+  body?: unknown
+): Promise<T> {
+  const { key, secret } = credentials();
+  return fetchJson<T>(`${host()}${path}`, {
+    ...RATE,
+    body,
+    headers: { 'APCA-API-KEY-ID': key, 'APCA-API-SECRET-KEY': secret },
+    method
+  });
 }
 
 async function get<T>(
@@ -359,14 +390,6 @@ export const alpacaAdapter: BrokerAdapter = {
     return netPositions(lots);
   },
 
-  /**
-   * Switches the active environment and persists the choice.
-   *
-   * An exported `ALPACA_ENV` wins over the stored value by design, so a switch
-   * made underneath one looks like it worked and then reverts on the next
-   * process. The caller is told which variable to unset rather than left to
-   * discover it.
-   */
   setEnvironment: env => {
     saveCredentials({ [ENV_ENVIRONMENT]: env });
 
@@ -377,6 +400,70 @@ export const alpacaAdapter: BrokerAdapter = {
     // Naming a variable that merely disagrees would send the user chasing a
     // red herring.
     return environment() === env ? {} : { shadowedBy: ENV_ENVIRONMENT };
+  },
+
+  /**
+   * Switches the active environment and persists the choice.
+   *
+   * An exported `ALPACA_ENV` wins over the stored value by design, so a switch
+   * made underneath one looks like it worked and then reverts on the next
+   * process. The caller is told which variable to unset rather than left to
+   * discover it.
+   */
+  trading: {
+    /**
+     * Errors propagate deliberately. Reporting a failed cancellation as a
+     * success is the worst direction for this particular error to point: the
+     * user believes an order is pulled while it is still working.
+     */
+    cancel: async (_accountId, orderId) => {
+      await send<unknown>(
+        `/v2/orders/${encodeURIComponent(orderId)}`,
+        'DELETE'
+      );
+    },
+
+    open: async () =>
+      (await get<RawOrder[]>('/v2/orders', { status: 'open' })).map(toPlaced),
+
+    /**
+     * Takes the preview rather than an order, so nothing can be sent that was
+     * not first priced and shown. The ref travels as `client_order_id`, which
+     * makes the broker's own record point back at the preview a human saw.
+     */
+    place: async preview => {
+      const { limitPrice, quantity, side, symbol } = preview.request;
+      return toPlaced(
+        await send<RawOrder>('/v2/orders', 'POST', {
+          client_order_id: preview.ref,
+          limit_price: limitPrice.toString(),
+          qty: quantity.toString(),
+          side,
+          symbol,
+          time_in_force: 'day',
+          type: 'limit'
+        })
+      );
+    },
+
+    /**
+     * Alpaca has no preview endpoint. The contract still requires the step,
+     * because the point of it is not the broker's arithmetic — it is that a
+     * person sees the order priced before anything reaches a market.
+     */
+    preview: request =>
+      Promise.resolve({
+        // Commission-free, and a limit order's worst case is the limit, so
+        // the total is arithmetic rather than an estimate.
+        estimatedCommission: ZERO,
+        estimatedTotal: request.limitPrice.times(request.quantity),
+        ref: `cb-${Date.now().toString(36)}-${request.symbol.toLowerCase()}`,
+        request,
+        warnings:
+          environment() === 'test'
+            ? ['Paper account: this order is simulated and moves no money.']
+            : ['Live account: this order commits real money.']
+      })
   },
 
   transactions: async (_accountId, options) => {

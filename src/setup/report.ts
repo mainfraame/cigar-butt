@@ -1,5 +1,6 @@
 import { groupBy } from 'lodash-es';
 
+import { tradingStatus } from '../broker/trading-gate.ts';
 import { PROVIDERS, type ProviderSpec } from '../config/providers.ts';
 import { type SetupReport, setupReport } from '../config/store.ts';
 
@@ -128,6 +129,17 @@ export function renderSetup(report: SetupReport = setupReport()): string {
       '\n\nEvery one of these has a free tier. SEC EDGAR needs no registration ' +
       'at all — just a real name and email. FINRA short interest and FDIC ' +
       'BankFind are unauthenticated and always work.'
+  );
+
+  sections.push(
+    '### Order placement\n\n' +
+      `This installation is **${tradingStatus()}**.\n\n` +
+      'Everything else here reads. Placing orders is off unless ' +
+      '`CIGAR_BUTT_ENABLE_ORDERS=1` is set, and off for real money unless ' +
+      '`CIGAR_BUTT_ENABLE_LIVE_ORDERS=1` is set as well — two separate ' +
+      'decisions, because the risk being guarded against is an order nobody ' +
+      'asked for. `CIGAR_BUTT_MAX_ORDER_VALUE` caps any single order and ' +
+      'defaults to $2,500. Orders are limit-only and day-only.'
   );
 
   sections.push(

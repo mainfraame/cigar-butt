@@ -11,7 +11,7 @@ export interface FetchJsonOptions {
   /** Form-encoded body. Mutually exclusive with `body`; implies POST. */
   readonly form?: Readonly<Record<string, string>>;
   readonly headers?: Readonly<Record<string, string>>;
-  readonly method?: 'GET' | 'POST';
+  readonly method?: 'DELETE' | 'GET' | 'POST';
   /** `text` returns the raw body; the default parses JSON. */
   readonly parse?: 'json' | 'text';
   /** Requests per second permitted against this host. */
@@ -176,6 +176,10 @@ export async function fetchJson<T>(
       return undefined as T;
     }
     if (response.ok) {
+      // A 204 carries no body, and `response.json()` on an empty one throws —
+      // which would report a successful cancellation as a failure, the worst
+      // direction for that particular error to point.
+      if (response.status === 204) return undefined as T;
       return options.parse === 'text'
         ? ((await response.text()) as T)
         : ((await response.json()) as T);

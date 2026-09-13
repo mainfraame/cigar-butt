@@ -139,6 +139,14 @@ pnpm 11+ reads its supply-chain settings from there rather than `.npmrc`.
   mark carrying _that leg's_ date; a live book never absorbs a paper one; and
   one broker failing never removes another's positions from the total, it only
   adds a note saying the total is short.
+- `src/broker/trading-gate.ts` — whether this installation may place an order
+  at all. Three independent gates, and the threat model is not a mistyped
+  ticket but an assistant sending an order nobody asked for:
+  `CIGAR_BUTT_ENABLE_ORDERS` (off in a fresh install),
+  `CIGAR_BUTT_ENABLE_LIVE_ORDERS` (a second, separate decision for real
+  money), and `CIGAR_BUTT_MAX_ORDER_VALUE` (per-order notional ceiling,
+  default $2,500). `refuseOrder` returns a _reason_ rather than throwing,
+  because a refusal a user cannot act on is the same as a bug.
 - `src/data/etrade.ts` — E*TRADE OAuth 1.0a (hand-signed on `node:crypto`, no
   dependency), accounts, balances, positions and transactions. Read-only; this
   server never places an order. **Every credential is stored per environment**
@@ -313,7 +321,28 @@ cash. `judge` returns `undefined` — not `false` — for the net-cash check on 
 financial, and reports debt/equity without letting it veto, because leverage is
 the business model. Go to tangible common equity instead.
 
-### 7. Not investment advice
+### 7. An order requires a preview a human has seen
+
+This server read nothing but data until order placement was added, and the
+property that replaced "it cannot trade" is: **no single call both decides and
+executes**. `order_preview` prices an order and returns a ref; `order_place`
+takes _only_ a ref. There is no argument to any one tool that originates a
+trade.
+
+Preserve that. Do not add a `symbol`/`quantity` argument to `order_place`, do
+not persist previews to disk, and do not let a ref be reused — one ref, one
+order, deleted on use, because a duplicate buy is indistinguishable from
+intent. Previews live in memory for the conversation precisely so that placing
+one requires the exchange in which it was shown.
+
+Orders are **limit-only and day-only** by construction. A market order into
+the thinly-traded names this method selects for is how you pay for someone
+else's exit, and a limit is the only order whose worst case a preview can
+state honestly. `TradingCapability` is optional on `BrokerAdapter`, so every
+consumer must handle its absence — that is what keeps read-only the default
+rather than a setting someone forgot.
+
+### 8. Not investment advice
 
 `DISCLAIMER` in `src/tools/shared.ts` is appended to every tool that produces or
 implies a portfolio decision — once per response, not once per session, because

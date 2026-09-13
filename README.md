@@ -519,8 +519,18 @@ re-baselining and one notification per cycle keep alerts from storming.
 
 ## What it will not do
 
-**It will not place a trade.** Every brokerage tool is read-only, and that is a
-design decision rather than an unfinished feature.
+**It will not place a trade unless you switch that on, twice.** Every
+brokerage tool was read-only until order placement was added behind two
+independent switches: `CIGAR_BUTT_ENABLE_ORDERS=1` enables paper and sandbox
+books, and real money additionally needs `CIGAR_BUTT_ENABLE_LIVE_ORDERS=1`. A
+fresh install cannot trade whatever anything asks of it.
+
+Where it is enabled, no single call both decides and executes: `order_preview`
+prices an order and returns a ref, and `order_place` takes only a ref. Orders
+are limit-only, day-only, whole-share, and capped per order
+(`CIGAR_BUTT_MAX_ORDER_VALUE`, default $2,500). The risk being guarded against
+is not you mistyping a ticket — it is an assistant sending an order you never
+saw.
 
 **It will not backtest.** A backtest assembled from a list picked with
 present-day knowledge is survivorship-biased by construction: you chose those

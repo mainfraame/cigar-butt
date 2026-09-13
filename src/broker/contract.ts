@@ -135,12 +135,79 @@ export interface Transaction {
   readonly type: string;
 }
 
+/** Side of an order. No shorting: this server screens long-only value. */
+export type OrderSide = 'buy' | 'sell';
+
+/**
+ * Limit only, deliberately.
+ *
+ * A market order in a name this method selects for is how you pay for
+ * someone else's exit: Identiv trades $442K a day, and the discount that
+ * makes these names interesting is frequently the illiquidity. A limit is
+ * also the only order whose worst case a preview can state honestly.
+ */
+export interface OrderRequest {
+  readonly accountId: string;
+  /** The limit. Required — see `OrderRequest`. */
+  readonly limitPrice: Decimal;
+  /** Whole shares. Fractional is broker-specific and out of scope. */
+  readonly quantity: Decimal;
+  readonly side: OrderSide;
+  readonly symbol: string;
+  /** Day only. A resting order nobody is watching is its own hazard. */
+  readonly timeInForce: 'day';
+}
+
+/**
+ * What the broker says an order would do, before it does it.
+ *
+ * The `ref` is the whole safety model. A preview is obtained first, shown to
+ * a human, and only then can it be placed — and it can only be placed by
+ * quoting the ref back. Nothing can go to market that a person has not seen
+ * priced.
+ */
+export interface OrderPreview {
+  readonly estimatedCommission: Decimal | undefined;
+  readonly estimatedTotal: Decimal | undefined;
+  /** Opaque handle the broker requires to place this exact order. */
+  readonly ref: string;
+  readonly request: OrderRequest;
+  /** Anything the broker wants the user to read. Never suppressed. */
+  readonly warnings: readonly string[];
+}
+
+export interface PlacedOrder {
+  readonly filledQuantity: Decimal | undefined;
+  readonly orderId: string;
+  readonly placedAt: string;
+  readonly status: string;
+  readonly symbol: string;
+}
+
+/**
+ * Placing orders. Present only on a broker this server can trade through,
+ * and reachable only when the operator has deliberately enabled trading.
+ *
+ * Split into preview and place on purpose. E*TRADE's API happens to work
+ * this way and Alpaca's does not, so the contract imposes it on both: an
+ * order must be priced and shown before it can be sent, and `place` takes a
+ * ref rather than an order, so there is no call that both decides and
+ * executes.
+ */
+export interface TradingCapability {
+  readonly cancel: (accountId: string, orderId: string) => Promise<void>;
+  readonly open: (accountId: string) => Promise<PlacedOrder[]>;
+  readonly place: (preview: OrderPreview) => Promise<PlacedOrder>;
+  readonly preview: (request: OrderRequest) => Promise<OrderPreview>;
+}
+
 /**
  * One brokerage integration.
  *
- * Read-only by construction: there is no order method and there must never be
- * one. Automating execution is the single change that turns this from a
- * research tool into something that can lose money unattended.
+ * Read-only unless the operator turns trading on. `trading` is absent by
+ * default and absent entirely on a broker not implemented for it, so every
+ * consumer must handle its absence — which is what keeps the read-only path
+ * the default rather than a setting someone forgot.
  */
 export interface BrokerAdapter {
   readonly accounts: () => Promise<BrokerAccount[]>;
@@ -202,6 +269,8 @@ export interface BrokerAdapter {
   readonly setEnvironment: (environment: BrokerEnvironment) => {
     shadowedBy?: string;
   };
+  /** Present only where this server can place an order. */
+  readonly trading?: TradingCapability;
   readonly transactions: (
     accountId: string,
     options?: { count?: number; endDate?: string; startDate?: string }
