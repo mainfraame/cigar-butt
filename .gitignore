@@ -11,3 +11,9 @@ coverage/
 .env
 .env.local
 *.key
+
+# Network captures. A HAR from a logged-in session carries cookies, bearer
+# tokens and full account payloads — everything an attacker would need. These
+# are working files for building an adapter and must never be committed.
+tmp/
+*.har

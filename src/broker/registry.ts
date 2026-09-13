@@ -1,5 +1,6 @@
 import { alpacaAdapter } from './alpaca-adapter.ts';
 import { etradeAdapter } from './etrade-adapter.ts';
+import { fidelityAdapter } from './fidelity-adapter.ts';
 
 import type { BrokerAdapter } from './contract.ts';
 
@@ -12,7 +13,8 @@ import type { BrokerAdapter } from './contract.ts';
  */
 const ADAPTERS: Readonly<Record<string, BrokerAdapter>> = {
   alpaca: alpacaAdapter,
-  etrade: etradeAdapter
+  etrade: etradeAdapter,
+  fidelity: fidelityAdapter
 };
 
 /** An adapter with the id it is registered under. */

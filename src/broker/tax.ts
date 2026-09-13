@@ -118,6 +118,24 @@ export function alpacaTaxTreatment(
 }
 
 /** How the treatment should read in tool output. */
+/**
+ * Fidelity reports registration as a legal construct code (`ROTHIRA`) and an
+ * `isIra` flag.
+ *
+ * Only two things are asserted, because only two are safe. A code naming Roth
+ * is Roth. Any other IRA is tax-deferred: Traditional, Rollover, SEP and SIMPLE
+ * all shelter growth and tax the withdrawal, and an inherited Roth still names
+ * Roth. A non-IRA account is left `unknown` rather than called taxable.
+ */
+export function fidelityTaxTreatment(
+  legalConstructCode: string | undefined,
+  isIra: boolean | undefined
+): TaxTreatment {
+  if (legalConstructCode?.toUpperCase().includes('ROTH')) return 'roth';
+  if (isIra === true) return 'tax-deferred';
+  return 'unknown';
+}
+
 export function describeTaxTreatment(treatment: TaxTreatment): string {
   switch (treatment) {
     case 'roth': {

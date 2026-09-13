@@ -153,6 +153,19 @@ pnpm 11+ reads its supply-chain settings from there rather than `.npmrc`.
   (`ETRADE_SANDBOX_*` / `ETRADE_PROD_*`), tokens included — the two sides are
   not interchangeable, and sharing one slot means a toggle silently signs
   production requests with sandbox material.
+- `src/data/fidelity.ts` and `src/broker/fidelity-adapter.ts` — Fidelity,
+  **read-only**, from the JSON services its own website calls. Fidelity
+  publishes no retail API, so these carry no compatibility promise and every
+  parser reads optionally. Auth is the user's browser session copied into
+  `FIDELITY_COOKIE`; it expires, and an expired one returns the HTML login page,
+  which `post` turns into "log in again". Two things that look opaque and are
+  not: the `pico`/`picoString` parameter is gzip+base64 of account JSON the
+  client builds (`encodePico`). And the positions grid interleaves `ACCOUNT`,
+  `POSITION`, `POSITION_CORE` (the cash sweep) and `ACCOUNT_TOTAL` rows — only
+  `POSITION` is a holding. The grid has no timestamp, so position `asOf` comes
+  from the same account's balances snapshot, never from today. No `trading`, no
+  environment, no transactions (the capture had none to parse), and Brokerage
+  accounts only — 401(k) plans use services that were not captured.
 - `src/data/congress.ts` — Senate eFD periodic and annual disclosures (HTML
   tables, session-cookie flow), the House Clerk's filing index (XML), and
   committee rosters from `unitedstates/congress-legislators`. No credential.

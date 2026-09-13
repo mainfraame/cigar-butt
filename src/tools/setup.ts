@@ -111,6 +111,10 @@ const credentialForm = z.object({
     .string()
     .optional()
     .meta({ title: 'E*TRADE sandbox consumer secret (optional)' }),
+  FIDELITY_COOKIE: z
+    .string()
+    .optional()
+    .meta({ title: 'Fidelity session Cookie header (optional, expires)' }),
   FINNHUB_API_KEY: z
     .string()
     .optional()

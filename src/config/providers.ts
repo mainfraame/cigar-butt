@@ -316,6 +316,25 @@ export const PROVIDERS: readonly ProviderSpec[] = [
     signupUrl: 'https://developer.etrade.com/getting-started'
   },
   {
+    envVar: 'FIDELITY_COOKIE',
+    id: 'fidelity-cookie',
+    label: 'Fidelity session cookie',
+    purpose:
+      'Reads positions and balances from Fidelity Brokerage accounts, read-only. ' +
+      'Fidelity publishes no retail API, so this uses the JSON services its own ' +
+      'website calls, authenticated by your browser session: it expires when the ' +
+      'session does, and the services can change without notice. Workplace ' +
+      '401(k) plans are not read. Treat the value like a password.',
+    requirement: 'optional',
+    setupSteps: [
+      'Log in at https://digital.fidelity.com.',
+      'Open developer tools, Network tab, and select any request to digital.fidelity.com.',
+      'Copy the full value of the Cookie request header.',
+      'Store it as FIDELITY_COOKIE with setup_credentials, and refresh it when a read reports an expired session.'
+    ],
+    signupUrl: 'https://digital.fidelity.com'
+  },
+  {
     envVar: 'COMPANIES_HOUSE_API_KEY',
     id: 'companies-house',
     label: 'UK Companies House',

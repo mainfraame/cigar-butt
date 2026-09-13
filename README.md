@@ -312,7 +312,12 @@ a sale happens at a broker, and which one decides its tax consequence.
 | `broker_environment`  | Show or switch which book each broker is pointed at, without mixing credentials                                                                                  |
 | `broker_disconnect`   | Revoke and delete a stored session token, leaving the API keys in place                                                                                          |
 
-Supported today: **E\*TRADE** and **Alpaca**. Adding a third is an adapter
+Supported today: **E\*TRADE** and **Alpaca**, plus **Fidelity read-only**.
+Fidelity has no public retail API, so its adapter uses the services its own
+website calls, authenticated by a browser session cookie you copy into
+`FIDELITY_COOKIE` — it expires with the session and can break when Fidelity
+changes its site. It reads Brokerage-account positions and balances only: no
+orders, no transaction history, no 401(k) plans. Adding a third is an adapter
 against `BrokerAdapter` plus one line in the registry — no tool changes.
 
 Four things the combined view does that a per-broker one cannot.
