@@ -438,12 +438,16 @@ export const alpacaAdapter: BrokerAdapter = {
         await send<RawOrder>('/v2/orders', 'POST', {
           client_order_id: preview.ref,
           limit_price: limitPrice.toString(),
-          // A bracket attaches the exit to the entry, so the sell exists only
-          // if the buy fills. No stop-loss leg: a falling price makes a
-          // net-net cheaper, and a stop would sell it at its most attractive.
+          // `oto`, not `bracket`. Alpaca's bracket class requires a
+          // stop_loss.stop_price and rejects the order without one — and a
+          // stop is the one leg this method will not attach, because a
+          // falling price makes a net-net cheaper and the stop would sell it
+          // at its most attractive. One-triggers-other carries a single exit,
+          // which is exactly the shape wanted: the sell exists only if the
+          // buy fills.
           ...(takeProfit
             ? {
-                order_class: 'bracket',
+                order_class: 'oto',
                 take_profit: { limit_price: takeProfit.toString() }
               }
             : {}),
