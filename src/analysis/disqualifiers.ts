@@ -70,9 +70,18 @@ const EIGHT_K_ITEMS: Record<string, { reason: string; severity: Severity }> = {
     severity: 'disqualify'
   },
   '5.01': {
+    // Raised from a note after Standard BioTools. Every asset test passed —
+    // 0.63x net current assets, 9.1x current ratio, no debt — while a signed
+    // all-stock merger was contributing those assets to Treeline Biosciences
+    // in exchange for 16% of the combined company. An asset thesis assumes
+    // the assets stay with the shareholders valuing them, and a change of
+    // control is precisely the event that ends that assumption.
     reason:
-      'Change in control — the name may be in play. Check for a pending deal.',
-    severity: 'note'
+      'Change in control. Read the agreement before valuing anything: in an ' +
+      'all-stock merger the balance sheet you are buying is contributed to ' +
+      'another company and you keep a fraction of the result, so a discount ' +
+      'to assets stops meaning what it usually means.',
+    severity: 'investigate'
   }
 };
 

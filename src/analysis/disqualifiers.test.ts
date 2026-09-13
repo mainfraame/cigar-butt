@@ -143,3 +143,30 @@ describe('scanDisqualifiers', () => {
     ]);
   });
 });
+
+describe('change of control', () => {
+  it('demands investigation rather than noting it in passing', () => {
+    // Standard BioTools passed every asset test — 0.63x net current assets,
+    // 9.1x current ratio, no debt — while a signed all-stock merger was
+    // contributing those assets to Treeline for 16% of the combined company.
+    const report = scanDisqualifiers(
+      summary([
+        event({}),
+        event({
+          accessionNumber: 'M',
+          filingDate: '2026-06-08',
+          form: '8-K',
+          items: ['1.01', '5.01']
+        })
+      ]),
+      { now: NOW }
+    );
+
+    const finding = report.flags.find(entry =>
+      entry.reason.includes('control')
+    );
+
+    expect(finding?.severity).toBe('investigate');
+    expect(finding?.reason).toContain('all-stock merger');
+  });
+});
